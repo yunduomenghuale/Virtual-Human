@@ -64,12 +64,14 @@ def ingest_text(source: str, title: str, text: str,
 
 
 def ingest_file(uploaded_file, title: str, description: str = '', uploader=None) -> KnowledgeDocument:
-    """支持 .txt / .md / .pdf。"""
+    """支持 .txt / .md / .pdf / .docx。"""
     name = uploaded_file.name
     suffix = Path(name).suffix.lower()
     raw = uploaded_file.read()
     if suffix == '.pdf':
         text = _extract_pdf_text(raw)
+    elif suffix == '.docx':
+        text = _extract_docx_text(raw)
     else:
         try:
             text = raw.decode('utf-8')
@@ -91,6 +93,17 @@ def _extract_pdf_text(raw: bytes) -> str:
         return '\n'.join((page.extract_text() or '') for page in reader.pages)
     except Exception as exc:  # noqa: BLE001
         logger.warning('PDF 解析失败: %s', exc)
+        return ''
+
+
+def _extract_docx_text(raw: bytes) -> str:
+    try:
+        from docx import Document
+        from io import BytesIO
+        doc = Document(BytesIO(raw))
+        return '\n'.join(p.text for p in doc.paragraphs if p.text)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('DOCX 解析失败: %s', exc)
         return ''
 
 

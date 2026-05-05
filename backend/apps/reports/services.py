@@ -54,7 +54,7 @@ def _agent_evaluation(report_data: dict) -> str:
     return get_text_llm().chat([
         {'role': 'system', 'content': '你是实验室消防安全专家,撰写专业、严谨、可执行的检查评价。'},
         {'role': 'user', 'content': prompt},
-    ], temperature=0.3, max_tokens=900)
+    ], temperature=0.3, max_tokens=2000)
 
 
 def _references(detections) -> list:

@@ -2,10 +2,16 @@
   <div class="agent-page">
     <!-- toolbar -->
     <div class="agent-toolbar">
-      <el-button text class="new-chat-btn" @click="newChat">
-        <el-icon :size="16"><Plus /></el-icon>
-        <span>新对话</span>
-      </el-button>
+      <div class="toolbar-left">
+        <el-button text class="new-chat-btn" @click="newChat">
+          <el-icon :size="16"><Plus /></el-icon>
+          <span>新对话</span>
+        </el-button>
+        <el-button text class="avatar-link-btn" @click="openAvatar">
+          <el-icon :size="16"><VideoCamera /></el-icon>
+          <span>数字人</span>
+        </el-button>
+      </div>
       <div class="toolbar-title">消防安全小安</div>
       <div style="width: 90px;"></div>
     </div>
@@ -288,6 +294,10 @@ function clearImage() {
   pendingImageBase64.value = ''
 }
 
+function openAvatar() {
+  window.open('/avatar-live', '_blank', 'noopener,noreferrer')
+}
+
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault()
@@ -400,9 +410,21 @@ onMounted(async () => {
   border-bottom: 1px solid #f0f0f0;
   flex-shrink: 0;
 }
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .new-chat-btn {
   font-size: 13px;
   color: var(--txt-secondary);
+}
+.avatar-link-btn {
+  font-size: 13px;
+  color: var(--txt-secondary);
+}
+.avatar-link-btn:hover {
+  color: var(--brand-orange);
 }
 .toolbar-title {
   font-size: 15px;

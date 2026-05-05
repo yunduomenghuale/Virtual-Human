@@ -8,6 +8,11 @@ const routes: RouteRecordRaw[] = [
     meta: { public: true, layout: 'blank' },
   },
   {
+    path: '/avatar-live',
+    component: () => import('@/views/Avatar.vue'),
+    meta: { title: '数字人', layout: 'blank' },
+  },
+  {
     path: '/',
     component: () => import('@/views/MainLayout.vue'),
     redirect: '/agent',
@@ -18,6 +23,9 @@ const routes: RouteRecordRaw[] = [
       { path: 'agent/history', name: 'agent-history',
         component: () => import('@/views/ChatHistory.vue'),
         meta: { title: '对话历史' } },
+      { path: 'avatar', name: 'avatar',
+        component: () => import('@/views/Avatar.vue'),
+        meta: { title: '数字人' } },
       { path: 'dashboard', name: 'dashboard',
         component: () => import('@/views/Dashboard.vue'),
         meta: { title: '首页' } },
