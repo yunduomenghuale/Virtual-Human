@@ -1,5 +1,5 @@
 export type Role = 'admin' | 'safety_officer' | 'experimenter'
-export type Skill = 'knowledge_qa' | 'report_gen' | 'hazard_detect' | 'analytics'
+export type Skill = 'knowledge_qa' | 'report_gen' | 'hazard_detect' | 'analytics' | 'scenario_training'
 export type Severity = 'low' | 'medium' | 'high'
 
 export interface UserInfo {
@@ -87,6 +87,7 @@ export type AgentToolPayload =
   | { type: 'hazard_detection'; data: HazardDetection }
   | { type: 'report'; data: ReportDetail }
   | { type: 'analytics'; metric: string; data: any }
+  | { type: 'scenario_training'; mode: 'teaching' | 'testing'; score?: number; analysis?: string; data: any }
   | { type: 'error'; tool: string; message: string }
 
 export interface AgentToolCall {

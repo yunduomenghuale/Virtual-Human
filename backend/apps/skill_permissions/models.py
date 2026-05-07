@@ -6,6 +6,7 @@ class SkillCode(models.TextChoices):
     REPORT_GEN = 'report_gen', '报告生成'
     HAZARD_DETECT = 'hazard_detect', '隐患识别'
     ANALYTICS = 'analytics', '数据分析'
+    SCENARIO_TRAINING = 'scenario_training', '场景设计与演练'
 
 
 class SkillPermission(models.Model):

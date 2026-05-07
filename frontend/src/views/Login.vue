@@ -7,7 +7,7 @@
     <div class="login-card">
       <div class="brand">
         <div class="logo">
-          <el-icon :size="38" color="#fff"><Shield /></el-icon>
+          <el-icon :size="38" color="#fff"><TrendCharts /></el-icon>
         </div>
         <h1>智安平台</h1>
         <p class="subtitle">AI 驱动的实验室隐患排查与报告平台</p>

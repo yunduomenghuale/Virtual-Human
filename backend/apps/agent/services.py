@@ -28,11 +28,12 @@ MAX_ITERATIONS = 5
 
 
 SYSTEM_PROMPT_TMPL = (
-    '你是「小安」,智安平台的 AI 助手,具备以下 4 项 skill,通过 tool-calling 调度:\n'
+    '你是「小安」,智安平台的 AI 助手,具备以下 5 项 skill,通过 tool-calling 调度:\n'
     '  - knowledge_qa: 检索消防安全知识库回答规范性问题\n'
     '  - hazard_detect: 对用户上传的现场图片识别隐患(需有图片)\n'
     '  - report_gen: 为某实验室生成 PDF / Word 安全检查报告\n'
     '  - analytics_query: 查询系统数据指标 / 实验室排行 / 最近隐患记录\n'
+    '  - scenario_training: 当用户要求进行消防培训、出题、演练或者分析事故场景时调用\n'
     '\n'
     '当前用户:{username}({role}),启用的 skill:{enabled_skills}。\n'
     '本轮用户附件:{attachment_state}。\n'
@@ -41,19 +42,25 @@ SYSTEM_PROMPT_TMPL = (
     '1. 当问题明显属于上述某项 skill 时,必须立即调用对应工具,禁止直接输出操作说明或占位符。\n'
     '2. 用户上传图片时,直接调用 hazard_detect。\n'
     '3. 用户要求"生成报告"时,直接调用 report_gen,禁止输出"我将为您生成..."等描述。\n'
-    '4. 工具结果会以结构化卡片形式呈现给用户;你只需用 1-2 句话点出要点 / 提示 / '
+    '4. scenario_training 场景演练流程：\n'
+    '   a) 用户首次要求培训/演练且未指定具体场景时，先调用 scenario_training(mode="list")，工具返回所有可选场景列表卡片，用户点击选择后自动发送选择消息。\n'
+    '   b) 用户选择具体场景后，调用 scenario_training(mode="teaching") 进行教学讲解。\n'
+    '   c) 用户要求测试时，调用 scenario_training(mode="testing")，工具返回场景描述，你向用户描述事故并提问。\n'
+    '   d) 用户回答后，再次调用 scenario_training(mode="testing", answer="用户回答")，工具返回评分结果，你直接展示给用户。\n'
+    '   e) 你的回复中禁止出现"任务指示"、"教学讲义内容"等元话语，直接输出讲解内容或评分结果即可。\n'
+    '5. 工具结果会以结构化卡片形式呈现给用户;你只需用 1-2 句话点出要点 / 提示 / '
     '建议,不要冗长复述工具数据。\n'
-    '5. 数据分析(analytics_query)的结果禁止罗列数字,必须给出"结论+建议":\n'
+    '6. 数据分析(analytics_query)的结果禁止罗列数字,必须给出"结论+建议":\n'
     '   - 点出最高风险项(哪个实验室/哪类隐患最严重)\n'
     '   - 指出变化趋势(上升/下降/持平,与平均水平的差距)\n'
     '   - 给出可执行建议("建议本周复查XX实验室"、"建议关注电气安全")\n'
     '   - 最多 2 句话,禁止输出 JSON 或表格\n'
     '   - 当用户提到具体实验室名称时,必须在 analytics_query 中传入 lab_name 参数,禁止返回全局数据\n'
-    '6. 严禁在回复中输出 /media/ 路径的 markdown 下载链接,前端会自动展示下载按钮。\n'
-    '7. 严禁以 JSON、markdown 代码块或文本形式输出工具参数,必须通过正式的 tool-calling 机制调用。\n'
-    '8. 若用户问题与消防安全无关,礼貌引导回主题。\n'
-    '9. 中文回答,语气专业、简洁。\n'
-    '10. 最重要:不要描述你要做什么,直接调用工具。禁止输出"我将为您调用..."等任何说明性文字。\n'
+    '7. 严禁在回复中输出 /media/ 路径的 markdown 下载链接,前端会自动展示下载按钮。\n'
+    '8. 严禁以 JSON、markdown 代码块或文本形式输出工具参数,必须通过正式的 tool-calling 机制调用。\n'
+    '9. 若用户问题与消防安全无关,礼貌引导回主题。\n'
+    '10. 中文回答,语气专业、简洁。\n'
+    '11. 最重要:不要描述你要做什么,直接调用工具。禁止输出"我将为您调用..."等任何说明性文字。\n'
 )
 
 
@@ -71,6 +78,46 @@ def _extract_report_args(text: str) -> Optional[Dict[str, str]]:
         if lab_name:
             return {'title': f'{lab_name}安全检查报告', 'lab_name': lab_name}
     return None
+
+
+def _extract_scenario_args(text: str) -> Optional[Dict[str, str]]:
+    """从用户消息中提取 scenario_training 参数。返回 {'mode': ...} 或 None。"""
+    t = text.strip()
+    # 1. 如果用户已经明确选择了具体场景（如"我要学习「XXX」"），直接走 teaching
+    selected_m = re.search(r'(我要学习|选择|学习)[\s「【]*([\u4e00-\u9fa5]{2,20})', t)
+    if selected_m:
+        return {'mode': 'teaching', 'topic': selected_m.group(2).strip()}
+    # 2. 必须包含明确意图词
+    if not re.search(r'(消防培训|场景演练|案例测试|实战演练|消防演练|消防知识学习|出题|考考我|来一题)', t):
+        return None
+    # 判断模式
+    if re.search(r'(测试|演练|演习|做题|答题|考考我|来一题|实战)', t):
+        mode = 'testing'
+    else:
+        mode = 'teaching'
+    # 判断难度
+    difficulty = ''
+    if re.search(r'(简单|低难度|初级)', t):
+        difficulty = 'low'
+    elif re.search(r'(困难|高难度|高级)', t):
+        difficulty = 'high'
+    elif re.search(r'(中等|中难度|中级)', t):
+        difficulty = 'medium'
+    # 尝试提取主题
+    topic = ''
+    # 匹配 "XX 场景" / "XX 演练" / "关于 XX" 等
+    m = re.search(r'(?:关于|来个|来一道|来一题|讲解|演练|培训)\s*([\u4e00-\u9fa5]{2,10})(?:场景|演练|培训|案例|火灾|起火|事故)', t)
+    if m:
+        topic = m.group(1).strip()
+    # 如果没有指定具体场景/主题，先列出场景列表让用户选择
+    if not topic:
+        return {'mode': 'list'}
+    args: Dict[str, str] = {'mode': mode}
+    if difficulty:
+        args['difficulty'] = difficulty
+    if topic:
+        args['topic'] = topic
+    return args
 
 
 def _system_prompt(user, has_attachment: bool) -> str:
@@ -228,6 +275,18 @@ def _try_extract_tool_intent(text: str, user_query: str) -> List[Dict[str, Any]]
             },
         })
 
+    # scenario_training: 仅检测明确的工具名，避免 LLM 回复中的"演练"等字样误触发
+    # 用户的明确请求已通过 _extract_scenario_args 硬规则短路处理
+    if 'scenario_training' in lowered:
+        found.append({
+            'id': f'intent_{len(found)}',
+            'type': 'function',
+            'function': {
+                'name': 'scenario_training',
+                'arguments': json.dumps({'mode': 'teaching'}, ensure_ascii=False),
+            },
+        })
+
     return found
 
 
@@ -305,6 +364,27 @@ def chat(*, user, messages: List[Dict[str, Any]],
                         'name': 'report_gen',
                         'args': report_args,
                         'skill': 'report_gen',
+                        'ok': payload.get('type') != 'error',
+                        'result': payload,
+                    }],
+                    'enabled_skills': list_skill_codes_for_user(user),
+                }
+
+    # 硬规则:检测到消防培训/场景演练关键词直接调用 scenario_training,跳过 LLM 决策
+    if is_skill_enabled(user.role, SkillCode.SCENARIO_TRAINING):
+        last_user_msg = next((m for m in reversed(messages or []) if m.get('role') == 'user'), None)
+        if last_user_msg:
+            scenario_args = _extract_scenario_args(last_user_msg.get('content', ''))
+            if scenario_args:
+                summary, payload = execute_tool(
+                    name='scenario_training', args=scenario_args, user=user, attachment=None,
+                )
+                return {
+                    'message': summary,
+                    'tool_calls': [{
+                        'name': 'scenario_training',
+                        'args': scenario_args,
+                        'skill': 'scenario_training',
                         'ok': payload.get('type') != 'error',
                         'result': payload,
                     }],
@@ -390,11 +470,11 @@ def chat(*, user, messages: List[Dict[str, Any]],
             final_text = getattr(msg, 'content', None) or ''
             break
 
-        # 短路优化:单一知识问答或隐患识别直接返回结果,不再走第二轮 LLM
+        # 短路优化:单一知识问答、隐患识别或场景演练直接返回结果,不再走第二轮 LLM
         if len(tool_calls) == 1:
             func = getattr(tool_calls[0], 'function', None) or {}
             name = getattr(func, 'name', '')
-            if name in ('knowledge_qa', 'hazard_detect'):
+            if name in ('knowledge_qa', 'hazard_detect', 'scenario_training'):
                 single_knowledge_qa = True
 
         # 把模型这一轮的 tool 调用追加进上下文
@@ -455,9 +535,12 @@ def chat(*, user, messages: List[Dict[str, Any]],
                 'result': p,
             })
 
-            # knowledge_qa / hazard_detect 短路:直接把答案作为最终输出
-            if single_knowledge_qa and name in ('knowledge_qa', 'hazard_detect'):
-                final_text = p.get('user_summary', s) if name == 'hazard_detect' else s
+            # knowledge_qa / hazard_detect / scenario_training 短路:直接把答案作为最终输出
+            if single_knowledge_qa and name in ('knowledge_qa', 'hazard_detect', 'scenario_training'):
+                if name == 'hazard_detect':
+                    final_text = p.get('user_summary', s)
+                else:
+                    final_text = s
                 break
 
             full_messages.append({

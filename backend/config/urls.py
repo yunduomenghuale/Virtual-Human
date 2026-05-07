@@ -19,6 +19,7 @@ urlpatterns = [
     path('api/skill-permissions/', include('apps.skill_permissions.urls')),
     path('api/agent/', include('apps.agent.urls')),
     path('api/labs/', include('apps.labs.urls')),
+    path('api/scenarios/', include('apps.scenarios.urls')),
 ]
 
 if settings.DEBUG:

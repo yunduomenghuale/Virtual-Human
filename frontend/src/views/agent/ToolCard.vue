@@ -126,6 +126,108 @@
       </div>
     </div>
 
+    <!-- scenario_training -->
+    <div v-else-if="tc.result.type === 'scenario_training'">
+      <!-- 场景列表 -->
+      <div v-if="tc.result.mode === 'list'" class="st-list">
+        <div class="st-list-head">
+          <div class="st-title">📚 消防培训场景库</div>
+          <span class="st-count">共 {{ tc.result.items.length }} 个场景</span>
+        </div>
+        <div class="st-list-body">
+          <div
+            v-for="(item, idx) in tc.result.items"
+            :key="item.id"
+            class="st-list-item"
+            @click="selectScenario(item)"
+          >
+            <div v-if="item.image" class="st-item-img">
+              <img :src="item.image" />
+            </div>
+            <div class="st-item-info">
+              <div class="st-item-title">
+                <span class="st-item-num">{{ idx + 1 }}</span>
+                {{ item.title }}
+              </div>
+              <div class="st-item-meta">
+                <el-tag size="small" effect="plain">{{ item.topic }}</el-tag>
+                <el-tag size="small" :type="difficultyTag(item.difficulty)" effect="dark">{{ item.difficulty }}</el-tag>
+              </div>
+              <div class="st-item-desc">{{ item.description }}</div>
+            </div>
+            <el-button type="primary" size="small" plain>选择学习</el-button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 教学模式 -->
+      <div v-else-if="tc.result.mode === 'teaching'" class="st-teaching">
+        <div class="st-head">
+          <div class="st-title">📖 消防培训：{{ tc.result.data.title }}</div>
+        </div>
+        <div class="st-content">
+          <MarkdownText :text="tc.result.data.teaching_content" />
+        </div>
+        <div class="st-tip">
+          <el-icon><InfoFilled /></el-icon> 讲解完毕后，请对小安说“开始实战测试”
+        </div>
+      </div>
+
+      <!-- 演习模式 - 有评分结果 -->
+      <div v-else-if="tc.result.mode === 'testing' && tc.result.score != null" class="st-testing">
+        <div class="result-header">
+          <div class="result-label">演练评估结果</div>
+          <div class="score" :class="getScoreClass(tc.result.score)">{{ tc.result.score }}<span>分</span></div>
+        </div>
+
+        <div class="analysis-box">
+          <div class="box-title">专家点评</div>
+          <p>{{ tc.result.analysis }}</p>
+        </div>
+
+        <!-- 资料下载卡片 -->
+        <div v-if="tc.result.data?.material_file" class="material-download-card">
+          <div class="m-icon">
+            <el-icon :size="24"><Document /></el-icon>
+          </div>
+          <div class="m-info">
+            <div class="m-name">{{ tc.result.data.material_name }}</div>
+            <div class="m-tip">点击下载原始课件，巩固消防知识</div>
+          </div>
+          <el-button type="primary" size="small" circle @click="openMaterial(tc.result.data.material_file)">
+            <el-icon><Download /></el-icon>
+          </el-button>
+        </div>
+      </div>
+
+      <!-- 演习模式 - 首次进入/场景描述 -->
+      <div v-else-if="tc.result.mode === 'testing'" class="st-testing-intro">
+        <div class="st-head">
+          <div class="st-title">🎯 实战演练：{{ tc.result.data.title }}</div>
+          <el-tag size="small" effect="dark">{{ tc.result.data.difficulty }}</el-tag>
+        </div>
+        <div v-if="tc.result.data.image" class="st-image">
+          <img :src="tc.result.data.image" />
+        </div>
+        <div class="st-desc">
+          <p><b>场景描述:</b> <MarkdownText :text="tc.result.data.description" inline /></p>
+        </div>
+        <!-- 资料下载卡片 -->
+        <div v-if="tc.result.data?.material_file" class="material-download-card">
+          <div class="m-icon">
+            <el-icon :size="24"><Document /></el-icon>
+          </div>
+          <div class="m-info">
+            <div class="m-name">{{ tc.result.data.material_name }}</div>
+            <div class="m-tip">点击下载原始课件，巩固消防知识</div>
+          </div>
+          <el-button type="primary" size="small" circle @click="openMaterial(tc.result.data.material_file)">
+            <el-icon><Download /></el-icon>
+          </el-button>
+        </div>
+      </div>
+    </div>
+
     <!-- analytics -->
     <div v-else-if="tc.result.type === 'analytics'">
       <div class="an-metric">指标:<b>{{ metricLabel(tc.result.metric) }}</b></div>
@@ -182,6 +284,7 @@ import LabSelect from '@/components/LabSelect.vue'
 import type { AgentToolCall } from '@/types'
 
 const props = defineProps<{ tc: AgentToolCall }>()
+const emit = defineEmits<{ (e: 'select-scenario', title: string): void }>()
 const router = useRouter()
 
 const editingLoc = ref(false)
@@ -225,6 +328,7 @@ const HEAD_MAP: Record<string, { icon: string; color: string; title: string }> =
   report: { icon: 'Document', color: '#f59e0b', title: '报告生成' },
   analytics_query: { icon: 'DataAnalysis', color: '#10b981', title: '数据分析' },
   analytics: { icon: 'DataAnalysis', color: '#10b981', title: '数据分析' },
+  scenario_training: { icon: 'HelpFilled', color: '#8b5cf6', title: '场景演练' },
   error: { icon: 'WarningFilled', color: '#909399', title: '工具调用' },
 }
 const headIcon = computed(() => HEAD_MAP[props.tc.result.type]?.icon || 'MagicStick')
@@ -309,6 +413,26 @@ function download(url: string | null, name: string) {
   document.body.appendChild(a)
   a.click()
   a.remove()
+}
+
+function openMaterial(url: string) {
+  window.open(url, '_blank')
+}
+
+function getScoreClass(score: number) {
+  if (score >= 80) return 'score-high'
+  if (score >= 60) return 'score-medium'
+  return 'score-low'
+}
+
+function difficultyTag(d: string) {
+  if (d === '高难度') return 'danger'
+  if (d === '中难度') return 'warning'
+  return 'success'
+}
+
+function selectScenario(item: any) {
+  emit('select-scenario', `我要学习「${item.title}」`)
 }
 </script>
 
@@ -422,6 +546,174 @@ function download(url: string | null, name: string) {
 .rp-eval-label { margin-bottom: 4px; color: var(--txt-primary); }
 .rp-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* scenario_training */
+.st-head {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 8px;
+}
+.st-title { font-weight: 700; font-size: 14px; flex: 1; }
+.st-image { margin-bottom: 8px; border-radius: 8px; overflow: hidden; background: #000; display: flex; justify-content: center; max-height: 200px; }
+.st-image img { max-width: 100%; object-fit: contain; }
+.st-desc p { margin: 4px 0; font-size: 12px; line-height: 1.65; color: var(--txt-secondary); }
+
+.st-teaching {
+  padding: 4px 0;
+}
+.st-testing-intro {
+  padding: 4px 0;
+}
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.result-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--txt-primary);
+}
+.score {
+  font-size: 32px;
+  font-weight: 700;
+  color: #f59e0b;
+}
+.score span {
+  font-size: 14px;
+  font-weight: 500;
+  margin-left: 2px;
+}
+.score-high { color: #10b981; }
+.score-medium { color: #f59e0b; }
+.score-low { color: #ef4444; }
+.analysis-box {
+  background: #f7f9fd;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.analysis-box .box-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 6px;
+  color: var(--txt-primary);
+}
+.analysis-box p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--txt-secondary);
+}
+.st-content {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #374151;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.st-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #6b7280;
+  background: #f9fafb;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+
+/* scenario list */
+.st-list { padding: 4px 0; }
+.st-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.st-count {
+  font-size: 12px;
+  color: var(--txt-muted);
+}
+.st-list-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.st-list-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all .2s ease;
+}
+.st-list-item:hover {
+  border-color: #c7d2fe;
+  background: #f5f7ff;
+  box-shadow: 0 2px 8px rgba(99,102,241,.08);
+}
+.st-item-img {
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f3f4f6;
+}
+.st-item-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.st-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.st-item-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--txt-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.st-item-num {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  align-items: center;
+  justify-content: center;
+}
+.st-item-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.st-item-desc {
+  font-size: 12px;
+  color: var(--txt-secondary);
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* analytics */
 .an-metric { font-size: 12px; color: var(--txt-secondary); margin-bottom: 8px; }
 .an-overview {
@@ -473,5 +765,43 @@ function download(url: string | null, name: string) {
   max-height: 240px;
   overflow: auto;
   margin: 0;
+}
+.material-download-card {
+  margin-top: 16px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.m-icon {
+  width: 40px;
+  height: 40px;
+  background: #fff;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+.m-info {
+  flex: 1;
+  min-width: 0;
+}
+.m-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.m-tip {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 2px;
 }
 </style>

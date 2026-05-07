@@ -47,7 +47,7 @@
         <div v-else-if="m.content || (m.toolCalls || []).length || m.pending || idx === typingIdx" class="msg msg-bot">
           <div class="bubble bubble-bot">
             <div v-for="(tc, i) in (m.toolCalls || []).filter(t => t.result?.type !== 'knowledge_qa' && t.ok !== false)" :key="i" class="tool-card-wrap">
-              <ToolCard :tc="tc" />
+              <ToolCard :tc="tc" @select-scenario="onSelectScenario" />
             </div>
             <div v-if="m.pending || (idx === typingIdx && !typingText)" class="typing"><span /><span /><span /></div>
             <MarkdownText v-if="idx === typingIdx ? typingText : m.content" :text="idx === typingIdx ? typingText : m.content" />
@@ -65,6 +65,16 @@
             <el-icon><Close /></el-icon>
           </el-button>
         </div>
+
+        <!-- 录音状态栏 -->
+        <div v-if="isRecording" class="recording-bar">
+          <div class="recording-wave">
+            <span v-for="n in 5" :key="n" :style="{ animationDelay: (n * 0.1) + 's' }" />
+          </div>
+          <span class="recording-text">正在聆听，点击麦克风结束</span>
+          <div class="recording-timer">{{ recordingDuration }}s</div>
+        </div>
+
         <el-input v-model="input" type="textarea" :rows="2" resize="none"
                   placeholder="发消息..."
                   class="composer-input"
@@ -78,6 +88,17 @@
                 <el-icon :size="18"><Plus /></el-icon>
               </el-button>
             </el-upload>
+            <div class="mic-wrap">
+              <div v-if="isRecording" class="mic-ripple" />
+              <el-button
+                text size="small"
+                :class="['attach-btn', 'mic-btn', { recording: isRecording }]"
+                :title="isRecording ? '点击结束录音' : '语音输入'"
+                @click="toggleRecording"
+              >
+                <el-icon :size="18"><Microphone /></el-icon>
+              </el-button>
+            </div>
             <span class="action-divider" />
           </div>
           <el-button type="primary" :disabled="!canSend" :loading="loading"
@@ -101,6 +122,7 @@ import { chatApi } from '@/api/chat'
 import type { AgentMessage, Skill } from '@/types'
 import ToolCard from './agent/ToolCard.vue'
 import MarkdownText from '@/components/MarkdownText.vue'
+import { Microphone } from '@element-plus/icons-vue'
 
 const auth = useAuthStore()
 
@@ -117,6 +139,82 @@ const typingText = ref('')
 let typingRunId = 0
 const currentSessionId = ref<string | null>(null)
 const directKnowledgeMode = ref(false)
+
+// 语音输入（浏览器原生 SpeechRecognition）
+const isRecording = ref(false)
+const recordingDuration = ref(0)
+let recognition: any = null
+let finalTranscript = ''
+let recordingTimer: number | null = null
+
+function toggleRecording() {
+  if (isRecording.value) {
+    stopRecording()
+  } else {
+    startRecording()
+  }
+}
+
+function startRecording() {
+  const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+  if (!SpeechRecognition) {
+    ElMessage.error('当前浏览器不支持语音识别，请使用 Chrome / Edge / Safari')
+    return
+  }
+
+  recognition = new SpeechRecognition()
+  recognition.lang = 'zh-CN'
+  recognition.continuous = true
+  recognition.interimResults = true
+  finalTranscript = input.value
+
+  recognition.onresult = (event: any) => {
+    let interim = ''
+    let final = ''
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript
+      if (event.results[i].isFinal) {
+        final += transcript
+      } else {
+        interim += transcript
+      }
+    }
+    if (final) {
+      finalTranscript += final
+    }
+    input.value = finalTranscript + interim
+  }
+
+  recognition.onerror = (event: any) => {
+    if (event.error === 'no-speech') return
+    ElMessage.error('语音识别错误: ' + event.error)
+    stopRecording()
+  }
+
+  recognition.onend = () => {
+    isRecording.value = false
+  }
+
+  recognition.start()
+  isRecording.value = true
+  recordingDuration.value = 0
+  recordingTimer = window.setInterval(() => {
+    recordingDuration.value++
+  }, 1000)
+  ElMessage.info('开始录音，请说话...')
+}
+
+function stopRecording() {
+  if (recognition) {
+    try { recognition.stop() } catch {}
+  }
+  isRecording.value = false
+  recognition = null
+  if (recordingTimer) {
+    clearInterval(recordingTimer)
+    recordingTimer = null
+  }
+}
 
 async function compressImageFile(file: File, maxWidth = 1200, quality = 0.8): Promise<File> {
   return new Promise((resolve, reject) => {
@@ -209,6 +307,7 @@ const skills: { code: Skill; label: string; icon: string }[] = [
   { code: 'hazard_detect', label: '隐患识别', icon: 'Picture' },
   { code: 'report_gen',    label: '报告生成', icon: 'Document' },
   { code: 'analytics',     label: '数据分析', icon: 'DataAnalysis' },
+  { code: 'scenario_training', label: '场景演练', icon: 'HelpFilled' },
 ]
 
 const canUseHazard = computed(() => auth.hasSkill('hazard_detect'))
@@ -216,6 +315,7 @@ const canSend = computed(() =>
   !loading.value && !isTyping.value && (input.value.trim().length > 0 || !!pendingImage.value))
 
 const EXAMPLES = [
+  '我要消防培训',
   '实验室常见消防隐患有哪些？',
   '查看最近 30 日的检测趋势',
   '总结一下化学楼 305 的隐患情况',
@@ -292,6 +392,13 @@ function clearImage() {
   pendingImage.value = null
   pendingImageUrl.value = ''
   pendingImageBase64.value = ''
+}
+
+function onSelectScenario(text: string) {
+  input.value = text
+  nextTick(() => {
+    if (canSend.value) send()
+  })
 }
 
 function openAvatar() {
@@ -639,6 +746,72 @@ onMounted(async () => {
   align-items: center;
   gap: 8px;
 }
+.recording-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  animation: fade-in 0.2s ease;
+}
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.recording-wave {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 18px;
+}
+.recording-wave span {
+  display: inline-block;
+  width: 3px;
+  height: 6px;
+  background: #ef4444;
+  border-radius: 2px;
+  animation: wave-jump 0.6s infinite ease-in-out alternate;
+}
+@keyframes wave-jump {
+  from { height: 4px; }
+  to   { height: 16px; }
+}
+.recording-text {
+  font-size: 13px;
+  color: #dc2626;
+  font-weight: 500;
+  flex: 1;
+}
+.recording-timer {
+  font-size: 12px;
+  color: #ef4444;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.mic-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.mic-ripple {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.15);
+  animation: ripple-scale 1.5s infinite ease-out;
+  pointer-events: none;
+}
+@keyframes ripple-scale {
+  0%   { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
 .attach-btn {
   color: var(--txt-secondary) !important;
   padding: 4px !important;
@@ -646,6 +819,18 @@ onMounted(async () => {
 .attach-btn:hover {
   color: var(--txt-primary) !important;
   background: transparent !important;
+}
+.mic-btn.recording {
+  color: #fff !important;
+  background: #ef4444 !important;
+  border-radius: 50% !important;
+  width: 32px !important;
+  height: 32px !important;
+  animation: mic-pulse 1.2s infinite;
+}
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
 }
 .action-divider {
   width: 1px;

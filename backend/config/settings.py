@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     'apps.agent',
     'apps.common',
     'apps.labs',
+    'apps.scenarios',
 ]
 
 MIDDLEWARE = [
@@ -145,6 +146,11 @@ EMBEDDING_API_KEY = config('EMBEDDING_API_KEY', default='')
 EMBEDDING_BASE_URL = config('EMBEDDING_BASE_URL',
                             default='https://dashscope.aliyuncs.com/compatible-mode/v1')
 USE_MOCK_EMBEDDING = config('USE_MOCK_EMBEDDING', default=False, cast=bool)
+
+# ===== ASR (语音识别) =====
+ASR_API_KEY = config('ASR_API_KEY', default=config('TEXT_LLM_API_KEY', default=''))
+ASR_BASE_URL = config('ASR_BASE_URL', default='https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription')
+ASR_MODEL = config('ASR_MODEL', default='paraformer-v1')
 
 # ===== RAG =====
 VECTOR_STORE_PATH = DATA_DIR / 'vector_store' / 'index.json'

@@ -25,7 +25,7 @@
           <div class="art-circle a"></div>
           <div class="art-circle b"></div>
           <div class="art-ring"></div>
-          <el-icon :size="64" color="rgba(255,255,255,.12)"><Shield /></el-icon>
+          <el-icon :size="64" color="rgba(255,255,255,.12)"><TrendCharts /></el-icon>
         </div>
       </div>
 
@@ -138,7 +138,7 @@
           <div class="art-circle a"></div>
           <div class="art-circle b"></div>
           <div class="art-ring"></div>
-          <el-icon :size="64" color="rgba(255,255,255,.12)"><Shield /></el-icon>
+          <el-icon :size="64" color="rgba(255,255,255,.12)"><TrendCharts /></el-icon>
         </div>
       </div>
 
@@ -228,7 +228,7 @@ const kpiList = computed(() => {
     { title: '问答记录', value: o.qa_sessions || 0, icon: 'ChatLineSquare', color: '#8b5cf6' },
     { title: '隐患识别', value: o.detections || 0, icon: 'Picture', color: '#ef4444' },
     { title: '报告', value: o.reports || 0, icon: 'Document', color: '#f59e0b' },
-    { title: '技能数', value: 4, icon: 'MagicStick', color: '#14b8a6' },
+    { title: '技能数', value: auth.user?.skills?.length || 0, icon: 'MagicStick', color: '#14b8a6' },
   ]
 })
 
@@ -319,7 +319,11 @@ onMounted(async () => {
     try {
       const r = await hazardApi.list({ page: 1 })
       recent.value = (r.results || []).slice(0, 5)
-    } catch {}
+    } catch (e: any) {
+      if (e.response?.status !== 401) {
+        console.error('Failed to load recent hazards', e)
+      }
+    }
   }
 
   // Admin 大屏额外加载 dashboard 数据

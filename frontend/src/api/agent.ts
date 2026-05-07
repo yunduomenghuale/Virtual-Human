@@ -19,4 +19,10 @@ export const agentApi = {
 
   skills: () =>
     http.get<unknown, { enabled_skills: Skill[] }>('/agent/skills/'),
+
+  asr: (audioBlob: Blob) => {
+    const fd = new FormData()
+    fd.append('audio', audioBlob, 'recording.webm')
+    return http.post<unknown, { text: string }>('/agent/asr/', fd)
+  },
 }

@@ -132,6 +132,39 @@ TOOL_DEFS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'scenario_training',
+            'description': (
+                '进行消防场景设计、培训与案例分析演练。当用户要求进行消防培训、出题、演练或者分析事故场景时调用。'
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'topic': {
+                        'type': 'string',
+                        'description': '场景主题(如电气火灾、违规动火等)，可空。',
+                    },
+                    'difficulty': {
+                        'type': 'string',
+                        'enum': ['low', 'medium', 'high'],
+                        'description': '演练难度。',
+                    },
+                    'mode': {
+                        'type': 'string',
+                        'enum': ['list', 'teaching', 'testing'],
+                        'description': '模式: list(列出所有可选场景供用户选择), teaching(知识点教学), testing(实战演习测试)。当用户首次要求培训且未指定具体场景时，先用 list 列出场景让用户选择。',
+                    },
+                    'answer': {
+                        'type': 'string',
+                        'description': '用户在实战测试中的回答内容。仅在 mode=testing 且用户已经作答后传入，用于 AI 评分。',
+                    },
+                },
+                'required': [],
+            },
+        },
+    },
 ]
 
 
@@ -141,6 +174,7 @@ SKILL_MAP: Dict[str, str] = {
     'hazard_detect': SkillCode.HAZARD_DETECT,
     'report_gen': SkillCode.REPORT_GEN,
     'analytics_query': SkillCode.ANALYTICS,
+    'scenario_training': SkillCode.SCENARIO_TRAINING,
 }
 
 
@@ -188,6 +222,8 @@ def execute_tool(*, name: str, args: Dict[str, Any], user,
             return _run_report_gen(args, user)
         if name == 'analytics_query':
             return _run_analytics(args)
+        if name == 'scenario_training':
+            return _run_scenario_training(args)
     except Exception as exc:  # noqa: BLE001
         logger.exception('工具 %s 执行失败: %s', name, exc)
         return f'工具 {name} 执行失败:{exc}', _err_payload(str(exc), name)
@@ -388,6 +424,150 @@ def _run_analytics(args: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     payload = {'type': 'analytics', 'metric': metric, 'lab_name': lab_name or None, 'data': data}
     summary = f'数据查询 ({metric}) 完成,结果如下(JSON 摘要):\n{json.dumps(data, ensure_ascii=False)[:1200]}'
     return summary, payload
+
+
+# ----- scenario_training -----
+def _run_scenario_training(args: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    import random
+    import re
+    from apps.scenarios.models import FireScenario
+    from apps.common.llm import get_text_llm
+
+    topic = args.get('topic', '')
+    difficulty = args.get('difficulty', '')
+    mode = args.get('mode', 'list')
+    answer = (args.get('answer') or '').strip()
+
+    qs = FireScenario.objects.all()
+    if topic:
+        # 用户可能传的是标题(title)而非主题(topic)，优先匹配 title
+        qs_title = qs.filter(title__icontains=topic)
+        if qs_title.exists():
+            qs = qs_title
+        else:
+            qs = qs.filter(topic__icontains=topic)
+    if difficulty:
+        qs = qs.filter(difficulty=difficulty)
+
+    scenarios = list(qs)
+    if not scenarios:
+        scenarios = list(FireScenario.objects.all())
+
+    if not scenarios:
+        return '暂无消防演练场景库数据。', _err_payload('无数据', 'scenario_training')
+
+    # mode=list: 返回场景列表供用户选择
+    if mode == 'list':
+        items = [
+            {
+                'id': s.id,
+                'title': s.title,
+                'topic': s.topic,
+                'difficulty': s.get_difficulty_display(),
+                'description': s.description[:120] + '...' if len(s.description) > 120 else s.description,
+                'image': s.image.url if s.image else None,
+            }
+            for s in scenarios
+        ]
+        summary = (
+            f"当前共有 {len(items)} 个消防培训场景可选，请告诉我想学习哪一个：\n"
+            + '\n'.join([f"{i+1}. 【{s['title']}】（{s['difficulty']}）— {s['topic']}" for i, s in enumerate(items)])
+        )
+        return summary, {
+            'type': 'scenario_training',
+            'mode': 'list',
+            'items': items,
+        }
+
+    # 非 list 模式：随机选一个场景（后续可按用户选择索引指定）
+    scenario = random.choice(scenarios)
+
+    data = {
+        'id': scenario.id,
+        'title': scenario.title,
+        'topic': scenario.topic,
+        'difficulty': scenario.get_difficulty_display(),
+        'description': scenario.description,
+        'image': scenario.image.url if scenario.image else None,
+        'teaching_content': scenario.teaching_content,
+        'correct_actions': scenario.correct_actions,
+        'analysis': scenario.analysis,
+        'material_file': scenario.material.file.url if scenario.material and scenario.material.file else None,
+        'material_name': scenario.material.file_name if scenario.material else None,
+    }
+
+    if mode == 'teaching':
+        teaching = scenario.teaching_content or ''
+        if not teaching.strip():
+            # fallback: 用场景各字段拼接生成讲义
+            parts = []
+            if scenario.description:
+                parts.append(f"## 场景背景\n{scenario.description}")
+            if scenario.correct_actions:
+                parts.append(f"## 标准处置流程\n{scenario.correct_actions}")
+            if scenario.analysis:
+                parts.append(f"## 案例总结\n{scenario.analysis}")
+            teaching = '\n\n'.join(parts)
+        if teaching.strip():
+            summary = (
+                f"各位学员好，今天我们学习的是【{scenario.title}】相关的消防安全知识。\n\n"
+                f"{teaching}\n\n"
+                f"以上内容你都理解了吗？如果已经掌握，请告诉我“开始实战测试”，我们来检验一下学习成果。"
+            )
+            return summary, {
+                'type': 'scenario_training',
+                'mode': 'teaching',
+                'data': data
+            }
+
+    if mode == 'testing' and answer:
+        # 用户已回答，调用 LLM 评分
+        llm = get_text_llm()
+        prompt = (
+            f"你是消防安全培训教官。请根据以下标准处置流程，对学员的回答进行评分和点评。\n\n"
+            f"场景：{scenario.title}\n"
+            f"场景描述：{scenario.description}\n"
+            f"标准处置流程：{scenario.correct_actions}\n\n"
+            f"学员回答：\n{answer}\n\n"
+            f"要求：\n"
+            f"1. 给出 0-100 的量化评分。\n"
+            f"2. 列出得分项和扣分项，指出学员回答中的正确之处和错误之处。\n"
+            f"3. 结合该场景给出消防案例总结（防范要点和经验教训）。\n"
+            f"4. 语气专业、鼓励为主，不要要求学员重新作答。\n\n"
+            f"请按以下格式输出：\n"
+            f"【评分】：X分\n"
+            f"【理由】：...\n"
+            f"【案例总结】：..."
+        )
+        result = llm.chat([{"role": "user", "content": prompt}], temperature=0.3, max_tokens=1500)
+        score_match = re.search(r'【评分】[：:]\s*(\d+)', result)
+        score = int(score_match.group(1)) if score_match else 0
+
+        summary = (
+            f"感谢你的回答。下面是对你本次【{scenario.title}】演练的评分与反馈：\n\n"
+            f"{result}\n\n"
+            f"继续保持学习，消防知识是保障实验室安全的第一道防线！"
+        )
+        return summary, {
+            'type': 'scenario_training',
+            'mode': 'testing',
+            'score': score,
+            'analysis': result,
+            'data': data
+        }
+
+    # testing 模式首次进入（无 answer）
+    summary = (
+        f"下面是实战演练环节。本次场景是【{scenario.title}】。\n\n"
+        f"{scenario.description}\n\n"
+        f"请问：如果你在现场，第一步应该怎么做？"
+    )
+    return summary, {
+        'type': 'scenario_training',
+        'mode': 'testing',
+        'data': data
+    }
+
 
 
 # ----- helpers -----

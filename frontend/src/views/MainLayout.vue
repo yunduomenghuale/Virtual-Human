@@ -3,7 +3,7 @@
     <el-aside :width="collapsed ? '64px' : '220px'" class="aside">
       <div class="brand" :class="{ collapsed }">
         <span class="logo">
-          <el-icon :size="18" color="#fff"><Shield /></el-icon>
+          <el-icon :size="18" color="#fff"><TrendCharts /></el-icon>
         </span>
         <span class="brand-text" :class="{ hidden: collapsed }">智安平台</span>
       </div>
@@ -94,6 +94,7 @@ const allMenus: MenuItem[] = [
   { path: '/admin/labs', title: '实验室管理', icon: 'OfficeBuilding', condition: () => auth.isAdmin },
   { path: '/admin/permissions', title: 'Skill 权限', icon: 'Lock', condition: () => auth.isAdmin },
   { path: '/admin/knowledge', title: '知识库管理', icon: 'Collection', condition: () => auth.isAdmin },
+  { path: '/admin/scenarios', title: '场景库管理', icon: 'CollectionTag', condition: () => auth.isAdmin },
   { path: '/agent', title: '小安', icon: 'MagicStick', condition: () => true },
   { path: '/agent/history', title: '对话历史', icon: 'ChatDotRound', condition: () => true },
   { path: '/hazards/history', title: '识别历史', icon: 'List', condition: () => auth.hasSkill('hazard_detect') },

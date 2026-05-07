@@ -108,13 +108,40 @@ class TextLLM:
     def _mock(messages: List[Dict[str, str]]) -> str:
         last = next((m for m in reversed(messages) if m.get('role') == 'user'), None)
         q = last['content'] if last else ''
+        
+        # 优先匹配教学内容生成请求 (JSON 格式)
+        if 'teaching_content' in q:
+            return json.dumps({
+                "teaching_content": "# 消防安全培训讲义\n\n1. **火源管理**：严禁在实验室内吸烟，使用明火需报备。\n2. **应急处理**：发现火情立即按下手动报警按钮。\n3. **疏散逃生**：沿绿色指示牌方向，用湿毛巾捂住口鼻低姿态逃生。",
+                "scenarios": [
+                    {
+                        "title": "实验室酒精灯起火",
+                        "topic": "化学品起火",
+                        "difficulty": "low",
+                        "description": "实验员在加热时酒精灯不慎被打翻，火势蔓延至桌面实验器材。",
+                        "correct_actions": "1. 立即用湿抹布或沙土覆盖火苗。\n2. 切断周边电源。\n3. 汇报实验室负责人。",
+                        "analysis": "酒精起火严禁用水扑救，物理隔离是第一选择。"
+                    },
+                    {
+                        "title": "配电箱短路冒烟",
+                        "topic": "电气火灾",
+                        "difficulty": "medium",
+                        "description": "配电箱内传出噼啪声，随后冒出刺鼻黑烟。",
+                        "correct_actions": "1. 立即切断总电源。\n2. 使用干粉灭火器。 3. 拨打校园119。",
+                        "analysis": "电气火灾必须先断电，再使用专用灭火器材。"
+                    }
+                ]
+            }, ensure_ascii=False)
+
         if '总结' in q or '评价' in q:
             return ('【Mock 评价】本次排查覆盖度较好,建议持续关注电气线路、化学品存放规范及'
                     '应急通道畅通,定期复查整改情况。')
+        
         if '隐患' in q or '消防' in q:
             return ('【Mock 回答】实验室常见消防隐患包括:1) 电气线路老化或私拉乱接;'
                     '2) 易燃化学品未分类存放;3) 灭火器材失效或被遮挡;4) 应急照明 / 疏散指示损坏;'
                     '5) 消防通道堆物。建议参照 GB 50016《建筑设计防火规范》开展整改。')
+                    
         return f'【Mock 回答】已收到问题:{q[:80]}……(配置 TEXT_LLM_API_KEY 后可获得真实回答)'
 
 

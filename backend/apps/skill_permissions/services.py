@@ -8,10 +8,10 @@ from .models import SkillPermission, SkillCode
 # 默认权限配置(对应文档.md 角色矩阵)
 DEFAULT_MATRIX: Dict[str, List[str]] = {
     'admin': [SkillCode.KNOWLEDGE_QA, SkillCode.REPORT_GEN,
-              SkillCode.HAZARD_DETECT, SkillCode.ANALYTICS],
+              SkillCode.HAZARD_DETECT, SkillCode.ANALYTICS, SkillCode.SCENARIO_TRAINING],
     'safety_officer': [SkillCode.KNOWLEDGE_QA, SkillCode.REPORT_GEN,
-                       SkillCode.HAZARD_DETECT],
-    'experimenter': [SkillCode.KNOWLEDGE_QA, SkillCode.HAZARD_DETECT],
+                       SkillCode.HAZARD_DETECT, SkillCode.SCENARIO_TRAINING],
+    'experimenter': [SkillCode.KNOWLEDGE_QA, SkillCode.HAZARD_DETECT, SkillCode.SCENARIO_TRAINING],
 }
 
 
