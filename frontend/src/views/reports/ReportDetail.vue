@@ -22,7 +22,7 @@
           <el-descriptions-item label="检查人">{{ report.inspector || '-' }}</el-descriptions-item>
           <el-descriptions-item label="创建人">{{ report.creator_name }}</el-descriptions-item>
           <el-descriptions-item label="生成时间">{{ report.created_at }}</el-descriptions-item>
-          <el-descriptions-item label="包含图片">{{ report.detection_count }} 张</el-descriptions-item>
+          <el-descriptions-item label="包含记录">{{ report.detection_count }} 条</el-descriptions-item>
           <el-descriptions-item label="备注">{{ report.extra_notes || '-' }}</el-descriptions-item>
         </el-descriptions>
       </el-card>
@@ -36,10 +36,12 @@
       </el-card>
 
       <el-card style="margin-top: 14px;">
-        <template #header><span class="section-title" style="margin:0;">隐患明细与图片快照</span></template>
+        <template #header><span class="section-title" style="margin:0;">隐患明细与媒体快照</span></template>
         <div v-for="(d, i) in report.detections" :key="d.id" class="det-block">
-          <h4>{{ i+1 }}. {{ d.lab_name || '现场图片' }} <span class="muted">({{ d.created_at }})</span></h4>
-          <img :src="d.annotated_image || d.original_image" />
+          <h4>{{ i+1 }}. {{ d.lab_name || '现场记录' }} <span class="muted">({{ d.created_at }})</span></h4>
+          <video v-if="d.media_type === 'video'" :src="d.original_image || undefined"
+                 :poster="d.cover_image || undefined" controls class="det-video" />
+          <img v-else :src="d.annotated_image || d.original_image" />
           <div class="det-summary"><b>评估:</b><MarkdownText :text="d.summary" /></div>
           <el-table :data="d.hazards" size="small" border>
             <el-table-column type="index" width="50" />
@@ -185,6 +187,15 @@ onMounted(load)
   border-radius: 10px;
   border: 1px solid var(--line-soft);
   box-shadow: 0 6px 20px rgba(15, 23, 42, .08);
+  margin: 8px 0;
+}
+.det-video {
+  display: block;
+  max-width: 100%;
+  max-height: 480px;
+  border-radius: 10px;
+  border: 1px solid var(--line-soft);
+  background: #0f172a;
   margin: 8px 0;
 }
 .det-block h4 {

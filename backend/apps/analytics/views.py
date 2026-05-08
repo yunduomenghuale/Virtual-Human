@@ -25,3 +25,30 @@ class LabsView(APIView):
 
     def get(self, request):
         return Response({'results': services.lab_overview()})
+
+
+class RootCauseAnalysisView(APIView):
+    """深度根因分析。"""
+    permission_classes = [IsAuthenticated, HasSkill]
+    required_skill = 'analytics'
+
+    def post(self, request):
+        from .deep_analysis import analyze_root_cause
+        lab_name = (request.data.get('lab_name') or '').strip() or None
+        days = request.data.get('days', 30)
+        result = analyze_root_cause(lab_name=lab_name, days=days)
+        return Response(result)
+
+
+class RiskPredictionView(APIView):
+    """风险预测。"""
+    permission_classes = [IsAuthenticated, HasSkill]
+    required_skill = 'analytics'
+
+    def post(self, request):
+        from .deep_analysis import predict_risks
+        lab_name = (request.data.get('lab_name') or '').strip() or None
+        days = request.data.get('days', 30)
+        forecast_days = request.data.get('forecast_days', 30)
+        result = predict_risks(lab_name=lab_name, days=days, forecast_days=forecast_days)
+        return Response(result)

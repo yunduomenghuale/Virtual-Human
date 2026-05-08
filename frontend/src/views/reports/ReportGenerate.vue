@@ -51,7 +51,7 @@
           </span>
         </div>
 
-        <el-table :data="detections" border highlight-current-row class="picker-table"
+        <el-table ref="tableRef" :data="detections" border highlight-current-row class="picker-table"
                   @selection-change="onSelectChange" :max-height="380">
           <el-table-column type="selection" width="55" />
           <el-table-column type="index" width="50" />
@@ -91,10 +91,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, reactive, computed, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import type { FormInstance, FormRules } from 'element-plus'
+import type { FormInstance, FormRules, TableInstance } from 'element-plus'
 import { reportApi } from '@/api/reports'
 import { hazardApi } from '@/api/hazards'
 import type { HazardDetection } from '@/types'
@@ -102,7 +102,9 @@ import { severityTag, severityLabel } from '@/utils/severity'
 import LabSelect from '@/components/LabSelect.vue'
 
 const router = useRouter()
+const route = useRoute()
 const formRef = ref<FormInstance>()
+const tableRef = ref<TableInstance>()
 const loading = ref(false)
 
 const form = reactive({
@@ -120,6 +122,10 @@ const rules: FormRules = {
 
 const detections = ref<HazardDetection[]>([])
 const filterLab = ref('')
+const initialDetectionIds = computed(() => String(route.query.detection_ids || '')
+  .split(',')
+  .map(id => Number(id))
+  .filter(id => Number.isFinite(id) && id > 0))
 
 const step = computed(() => {
   if (loading.value) return 2
@@ -131,6 +137,18 @@ const step = computed(() => {
 async function loadDetections() {
   const r = await hazardApi.list({ page: 1, page_size: 100, lab_name: filterLab.value || undefined })
   detections.value = r.results || []
+  await nextTick()
+  applyInitialSelection()
+}
+
+function applyInitialSelection() {
+  if (!initialDetectionIds.value.length || !tableRef.value) return
+  const idSet = new Set(initialDetectionIds.value)
+  const rows = detections.value.filter(item => idSet.has(item.id))
+  rows.forEach(row => tableRef.value?.toggleRowSelection(row, true))
+  if (!form.detection_ids.length && rows.length) {
+    onSelectChange(rows)
+  }
 }
 
 function onSelectChange(rows: HazardDetection[]) {

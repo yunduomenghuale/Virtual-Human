@@ -77,7 +77,7 @@
             </template>
             <el-table :data="recentDetections" stripe size="small" empty-text="暂无识别记录"
                       max-height="180"
-                      @row-click="row => $router.push(`/hazards/history?id=${row.id}`)">
+                      @row-click="(row: HazardDetection) => $router.push(`/hazards/history?id=${row.id}`)">
               <el-table-column prop="created_at" label="时间" width="155" />
               <el-table-column prop="lab_name" label="地点" min-width="100" show-overflow-tooltip />
               <el-table-column label="隐患数" width="70" align="center">

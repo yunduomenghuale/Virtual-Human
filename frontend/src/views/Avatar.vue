@@ -37,11 +37,14 @@
     <div class="avatar-controls">
       <div class="composer-glass">
         <div class="composer-main">
-          <div v-if="pendingImageUrl" class="attach-preview">
-            <img :src="pendingImageUrl" />
-            <el-button size="small" circle class="attach-remove" @click="clearImage">
-              <el-icon><Close /></el-icon>
-            </el-button>
+          <div v-if="pendingImages.length" class="attach-preview-list">
+            <div v-for="(item, idx) in pendingImages" :key="item.key" class="attach-preview">
+              <img v-if="item.url" :src="item.url" />
+              <div v-else class="attach-video">{{ item.name }}</div>
+              <el-button size="small" circle class="attach-remove" @click="removeImage(idx)">
+                <el-icon><Close /></el-icon>
+              </el-button>
+            </div>
           </div>
           <el-input
             v-model="inputText"
@@ -54,10 +57,11 @@
           />
           <div class="composer-tools">
             <el-upload
+              multiple
               :auto-upload="false"
               :show-file-list="false"
               :on-change="onPick"
-              accept="image/png,image/jpeg"
+              accept="image/png,image/jpeg,video/mp4,video/webm,video/quicktime"
             >
               <el-button
                 text
@@ -68,6 +72,15 @@
                 <el-icon :size="18"><Plus /></el-icon>
               </el-button>
             </el-upload>
+            <el-button
+              text
+              size="small"
+              :disabled="!canUseHazard"
+              class="attach-btn"
+              @click="cameraVisible = true"
+            >
+              <el-icon :size="18"><Camera /></el-icon>
+            </el-button>
           </div>
         </div>
         <div class="control-btns">
@@ -94,6 +107,7 @@
         </div>
       </div>
     </div>
+    <CameraCapture v-model="cameraVisible" @capture="addPendingImage" />
   </div>
 </template>
 
@@ -104,6 +118,8 @@ import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { agentApi } from '@/api/agent'
 import type { AgentMessage } from '@/types'
+import CameraCapture from '@/components/CameraCapture.vue'
+import { extractVideoCover } from '@/utils/videoCover'
 
 const route = useRoute()
 const auth = useAuthStore()
@@ -116,9 +132,8 @@ const inputText = ref('')
 const isListening = ref(false)
 const aiLoading = ref(false)
 const messages = ref<AgentMessage[]>([])
-const pendingImage = ref<File | null>(null)
-const pendingImageUrl = ref('')
-const pendingImageBase64 = ref('')
+const pendingImages = ref<{ file: File; url: string; base64: string; name: string; key: string }[]>([])
+const cameraVisible = ref(false)
 
 let avatar: any = null
 let recognition: any = null
@@ -135,7 +150,7 @@ const stateLabel = computed(() => {
 
 const canUseHazard = computed(() => auth.hasSkill('hazard_detect'))
 const canSpeak = computed(() =>
-  sdkReady.value && !aiLoading.value && (inputText.value.trim().length > 0 || !!pendingImage.value))
+  sdkReady.value && !aiLoading.value && (inputText.value.trim().length > 0 || pendingImages.value.length > 0))
 
 const lastAiMsg = computed(() => {
   const last = [...messages.value].reverse().find(m => m.role === 'assistant')
@@ -192,31 +207,66 @@ async function compressImageToBase64(file: File, maxWidth = 800, quality = 0.7):
 }
 
 async function onPick(f: any) {
-  const real = f.raw || f
+  const real = (f.raw || f) as File | undefined
   if (!real) return
   if (!canUseHazard.value) {
     ElMessage.warning('当前角色未启用「隐患识别」skill')
     return
   }
-  if (pendingImageUrl.value) URL.revokeObjectURL(pendingImageUrl.value)
-  try {
-    pendingImage.value = await compressImageFile(real, 1200, 0.8)
-  } catch {
-    pendingImage.value = real
+  await addPendingImage(real)
+}
+
+async function addPendingImage(file: File) {
+  if (file.type.startsWith('video/')) {
+    let cover = ''
+    try {
+      cover = await extractVideoCover(file)
+    } catch {
+      cover = ''
+    }
+    pendingImages.value.push({
+      file,
+      url: cover,
+      base64: '',
+      name: file.name,
+      key: `${file.name}-${file.lastModified}-${Date.now()}`,
+    })
+    ElMessage.success('视频已加入待识别列表')
+    return
   }
-  pendingImageUrl.value = URL.createObjectURL(pendingImage.value)
   try {
-    pendingImageBase64.value = await compressImageToBase64(pendingImage.value, 800, 0.7)
+    const compressed = await compressImageFile(file, 1200, 0.8)
+    await pushPendingImage(compressed, file.name)
   } catch {
-    pendingImageBase64.value = ''
+    await pushPendingImage(file, file.name)
   }
 }
 
+async function pushPendingImage(file: File, originalName: string) {
+  const url = URL.createObjectURL(file)
+  let base64 = ''
+  try {
+    base64 = await compressImageToBase64(file, 800, 0.7)
+  } catch {
+    base64 = ''
+  }
+  pendingImages.value.push({
+    file,
+    url,
+    base64,
+    name: originalName,
+    key: `${originalName}-${file.lastModified}-${Date.now()}`,
+  })
+}
+
 function clearImage() {
-  if (pendingImageUrl.value) URL.revokeObjectURL(pendingImageUrl.value)
-  pendingImage.value = null
-  pendingImageUrl.value = ''
-  pendingImageBase64.value = ''
+  pendingImages.value.forEach(item => URL.revokeObjectURL(item.url))
+  pendingImages.value = []
+}
+
+function removeImage(index: number) {
+  const [removed] = pendingImages.value.splice(index, 1)
+  if (removed) URL.revokeObjectURL(removed.url)
 }
 
 /** 动态加载魔珐星云 SDK */
@@ -289,20 +339,19 @@ async function initAvatar() {
 /** 调用大模型 + 驱动数字人说话 */
 async function speakText() {
   const text = inputText.value.trim()
-  if ((!text && !pendingImage.value) || !avatar || aiLoading.value) return
+  if ((!text && !pendingImages.value.length) || !avatar || aiLoading.value) return
 
   messages.value.push({
     role: 'user',
     content: text,
-    attachmentUrl: pendingImageUrl.value || undefined,
-    attachmentBase64: pendingImageBase64.value || undefined,
+    attachmentUrls: pendingImages.value.map(item => item.url).filter(Boolean),
+    attachmentBase64List: pendingImages.value.map(item => item.base64).filter(Boolean),
+    attachmentNames: pendingImages.value.map(item => item.name),
   })
-  const sentImage = pendingImage.value
-  const sentImageUrl = pendingImageUrl.value
+  const sentImages = pendingImages.value.map(item => item.file)
+  const sentImageUrls = pendingImages.value.map(item => item.url)
   inputText.value = ''
-  pendingImage.value = null
-  pendingImageUrl.value = ''
-  pendingImageBase64.value = ''
+  pendingImages.value = []
 
   avatarState.value = 'think'
   avatar?.think()
@@ -313,7 +362,7 @@ async function speakText() {
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .map(m => ({ role: m.role, content: m.content || '' }))
 
-    const res = await agentApi.chat(safeMessages, sentImage)
+    const res = await agentApi.chat(safeMessages, sentImages)
 
     messages.value.push({ role: 'assistant', content: res.message || '' })
 
@@ -328,9 +377,10 @@ async function speakText() {
     ElMessage.error(errMsg)
   } finally {
     aiLoading.value = false
-    if (sentImageUrl && !messages.value.some(m => m.attachmentUrl === sentImageUrl)) {
-      URL.revokeObjectURL(sentImageUrl)
-    }
+    sentImageUrls.forEach(url => {
+      const stillUsed = messages.value.some(m => (m.attachmentUrls || []).includes(url) || m.attachmentUrl === url)
+      if (!stillUsed) URL.revokeObjectURL(url)
+    })
   }
 }
 
@@ -340,7 +390,7 @@ function toggleListen() {
     stopListening()
     return
   }
-  if (!window.SpeechRecognition && !(window as any).webkitSpeechRecognition) {
+  if (!(window as any).SpeechRecognition && !(window as any).webkitSpeechRecognition) {
     ElMessage.warning('当前浏览器不支持语音输入')
     return
   }
@@ -348,7 +398,7 @@ function toggleListen() {
 }
 
 function startListening() {
-  const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition
+  const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
   recognition = new SpeechRecognition()
   recognition.lang = 'zh-CN'
   recognition.continuous = false
@@ -411,6 +461,7 @@ onUnmounted(() => {
   document.body.style.overflow = ''
   document.removeEventListener('visibilitychange', onVisibilityChange)
   stopListening()
+  clearImage()
   avatar?.idle?.()
   setTimeout(() => avatar?.destroy?.(), 200)
 })
@@ -530,15 +581,39 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 6px;
 }
+.attach-preview-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 92px;
+  overflow-y: auto;
+  padding-top: 2px;
+}
 .attach-preview {
   position: relative;
   display: inline-block;
 }
 .attach-preview img {
-  max-width: 100px;
-  max-height: 75px;
+  width: 96px;
+  height: 72px;
+  object-fit: cover;
   border-radius: 8px;
   border: 1px solid rgba(255,255,255,.1);
+}
+.attach-video {
+  width: 96px;
+  height: 72px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.1);
+  background: rgba(255,255,255,.08);
+  color: rgba(255,255,255,.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  text-align: center;
+  word-break: break-all;
+  font-size: 11px;
 }
 .attach-remove {
   position: absolute;

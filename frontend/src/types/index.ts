@@ -25,8 +25,12 @@ export interface HazardDetection {
   id: number
   user: number
   user_name: string
+  lab: number | null
   lab_name: string
+  other_location: string
+  media_type: 'image' | 'video'
   original_image: string
+  cover_image: string | null
   annotated_image: string | null
   summary: string
   overall_severity: Severity
@@ -75,8 +79,11 @@ export interface AgentMessage {
   content: string
   /** 仅前端用,用于渲染 */
   attachmentUrl?: string
+  attachmentUrls?: string[]
+  attachmentNames?: string[]
   /** 持久化用 base64,避免 blob URL 刷新后失效 */
   attachmentBase64?: string
+  attachmentBase64List?: string[]
   toolCalls?: AgentToolCall[]
   pending?: boolean
 }

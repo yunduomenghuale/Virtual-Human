@@ -128,7 +128,7 @@ HAZARD_DETECT_PROMPT = (
     '  "hazards": [\n'
     '    {\n'
     '      "name": "隐患简称(不超过 12 字)",\n'
-    '      "category": "电气|化学品|通道|灭火器|防护|通风|其他",\n'
+    '      "category": "电气风险类|消防设施失效类|消防通道堵塞类|易燃物管理类|其他",\n'
     '      "severity": "low|medium|high",\n'
     '      "description": "1-3 句详细描述",\n'
     '      "suggestion": "整改建议"\n'
@@ -136,6 +136,14 @@ HAZARD_DETECT_PROMPT = (
     '  ]\n'
     '}\n'
     '若图片明显不是实验室,返回 hazards 为空数组并在 summary 说明。'
+)
+
+VIDEO_HAZARD_DETECT_PROMPT = HAZARD_DETECT_PROMPT.replace(
+    '这张图片',
+    '这段视频',
+).replace(
+    '若图片明显不是实验室',
+    '若视频明显不是实验室',
 )
 
 
@@ -182,11 +190,55 @@ class VisionLLM:
             mock['summary'] = f'[视觉模型调用失败,已降级 mock]{exc}'
             return mock
 
+    def detect_hazards_in_video(self, video_path: str | Path,
+                                extra_instruction: str = '') -> Dict[str, Any]:
+        """直接把本地视频转成 data URL 后交给视觉模型理解。
+
+        注意:视频通常比图片大得多,真实可用性取决于模型服务的请求体大小限制。
+        如果接口拒绝大文件,前端/后端抽帧会更稳。
+        """
+        if not self.available:
+            mock = _mock_detection()
+            mock['summary'] = '【Mock 视频分析】未配置 VISION_LLM_API_KEY,展示示例隐患。'
+            return mock
+        try:
+            data_url = self._to_data_url(video_path)
+            user_blocks = [
+                {'type': 'text', 'text': VIDEO_HAZARD_DETECT_PROMPT +
+                 (f'\n\n补充说明:{extra_instruction}' if extra_instruction else '')},
+                {'type': 'video_url', 'video_url': {'url': data_url}},
+            ]
+            resp = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {'role': 'system', 'content': '你是实验室消防安全 AI,擅长识别视频中的安全隐患。'},
+                    {'role': 'user', 'content': user_blocks},
+                ],
+                temperature=0.1,
+                max_tokens=1800,
+            )
+            text = resp.choices[0].message.content or ''
+            return self._parse_json_payload(text)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception('视频 LLM 调用失败: %s', exc)
+            mock = _mock_detection()
+            mock['summary'] = f'[视频模型调用失败,已降级 mock]{exc}'
+            return mock
+
     @staticmethod
     def _to_data_url(path: str | Path) -> str:
         path = Path(path)
         ext = path.suffix.lower().lstrip('.')
-        mime = 'image/jpeg' if ext in ('jpg', 'jpeg') else f'image/{ext or "png"}'
+        if ext in ('jpg', 'jpeg'):
+            mime = 'image/jpeg'
+        elif ext in ('mp4', 'm4v'):
+            mime = 'video/mp4'
+        elif ext == 'webm':
+            mime = 'video/webm'
+        elif ext in ('mov', 'qt'):
+            mime = 'video/quicktime'
+        else:
+            mime = f'image/{ext or "png"}'
         with open(path, 'rb') as fh:
             b64 = base64.b64encode(fh.read()).decode('ascii')
         return f'data:{mime};base64,{b64}'
