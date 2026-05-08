@@ -295,7 +295,7 @@ import { severityTag, severityLabel, severityColor } from '@/utils/severity'
 
 use([CanvasRenderer, LineChart, BarChart, TooltipComponent, LegendComponent, GridComponent])
 
-const loading = ref(false)
+const loading = ref<string | false>(false)
 const selectedLab = ref('__all__')
 const days = ref(30)
 const labs = ref<Lab[]>([])

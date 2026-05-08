@@ -74,7 +74,7 @@
 
     <el-drawer v-model="drawer" :title="current?.lab_name || '识别详情'" size="60%">
       <div v-if="current" class="drawer-body">
-        <img :src="current.media_type === 'video' ? current.cover_image : (current.annotated_image || current.original_image)" class="detail-img" />
+        <img :src="current.media_type === 'video' ? (current.cover_image || undefined) : (current.annotated_image || current.original_image || undefined)" class="detail-img" />
         <div class="detail-summary">
           <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
             <b>地点:</b>

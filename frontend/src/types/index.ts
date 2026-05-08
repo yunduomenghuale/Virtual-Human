@@ -94,7 +94,10 @@ export type AgentToolPayload =
   | { type: 'hazard_detection'; data: HazardDetection }
   | { type: 'report'; data: ReportDetail }
   | { type: 'analytics'; metric: string; data: any }
+  | { type: 'scenario_training'; mode: 'list'; items: any[] }
   | { type: 'scenario_training'; mode: 'teaching' | 'testing'; score?: number; analysis?: string; data: any }
+  | { type: 'root_cause_analysis'; summary: string; root_causes?: any[]; risk_hotspots?: any[]; recommendations?: string[]; [k: string]: any }
+  | { type: 'risk_prediction'; summary: string; trend_assessment?: string; forecast?: any[]; early_warnings?: any[]; seasonal_insights?: string; [k: string]: any }
   | { type: 'error'; tool: string; message: string }
 
 export interface AgentToolCall {
