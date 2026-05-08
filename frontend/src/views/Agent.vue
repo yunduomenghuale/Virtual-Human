@@ -39,8 +39,18 @@
       <!-- messages -->
       <template v-for="(m, idx) in messages" :key="idx">
         <div v-if="m.role === 'user'" class="msg msg-user">
-          <div class="bubble bubble-user" :class="{ 'bubble-user-plain': !m.content && (m.attachmentUrl || m.attachmentBase64) }">
-            <img v-if="m.attachmentBase64 || m.attachmentUrl" :src="m.attachmentBase64 || m.attachmentUrl" class="bubble-img" />
+          <div class="bubble bubble-user" :class="{ 'bubble-user-plain': !m.content && messageMedia(m).length }">
+            <div v-if="messageMedia(m).length" class="bubble-img-grid">
+              <template v-for="(item, imgIdx) in messageMedia(m)" :key="imgIdx">
+                <div v-if="isVideo(item.name)" class="bubble-img-wrap">
+                  <img v-if="item.url" :src="item.url" class="bubble-img" />
+                  <div v-else class="bubble-img bubble-video-fallback"><el-icon><VideoPlay /></el-icon></div>
+                  <div class="video-badge"><el-icon><VideoPlay /></el-icon></div>
+                </div>
+                <img v-else-if="item.url" :src="item.url" class="bubble-img" />
+                <div v-else class="bubble-video">{{ item.name }}</div>
+              </template>
+            </div>
             <div v-if="m.content" class="bubble-text">{{ m.content }}</div>
           </div>
         </div>
@@ -59,11 +69,15 @@
     <!-- composer -->
     <div class="composer">
       <div class="composer-box">
-        <div v-if="pendingImage" class="attach-preview">
-          <img :src="pendingImageUrl" />
-          <el-button size="small" circle class="attach-remove" @click="clearImage">
-            <el-icon><Close /></el-icon>
-          </el-button>
+        <div v-if="pendingImages.length" class="attach-preview-list">
+          <div v-for="(item, idx) in pendingImages" :key="item.key" class="attach-preview">
+            <img v-if="item.url" :src="item.url" :class="{ 'attach-video-img': isVideo(item.name) }" />
+            <div v-else class="attach-video"><el-icon><VideoPlay /></el-icon></div>
+            <div v-if="isVideo(item.name) && item.url" class="video-badge-small"><el-icon><VideoPlay /></el-icon></div>
+            <el-button size="small" circle class="attach-remove" @click="removeImage(idx)">
+              <el-icon><Close /></el-icon>
+            </el-button>
+          </div>
         </div>
 
         <!-- 录音状态栏 -->
@@ -81,8 +95,8 @@
                   @keydown="onKeydown" />
         <div class="composer-footer">
           <div class="quick-actions">
-            <el-upload :auto-upload="false" :show-file-list="false"
-                       :on-change="onPick" accept="image/png,image/jpeg">
+            <el-upload multiple :auto-upload="false" :show-file-list="false"
+                       :on-change="onPick" accept="image/png,image/jpeg,video/mp4,video/webm,video/quicktime">
               <el-button text size="small" :disabled="!canUseHazard" title="上传图片"
                          class="attach-btn">
                 <el-icon :size="18"><Plus /></el-icon>
@@ -99,6 +113,10 @@
                 <el-icon :size="18"><Microphone /></el-icon>
               </el-button>
             </div>
+            <el-button text size="small" :disabled="!canUseHazard" title="拍照"
+                       class="attach-btn" @click="cameraVisible = true">
+              <el-icon :size="18"><Camera /></el-icon>
+            </el-button>
             <span class="action-divider" />
           </div>
           <el-button type="primary" :disabled="!canSend" :loading="loading"
@@ -109,12 +127,13 @@
       </div>
       <div class="composer-hint">内容由 AI 生成，请仔细甄别</div>
     </div>
+    <CameraCapture v-model="cameraVisible" @capture="addPendingImage" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { agentApi } from '@/api/agent'
 import { knowledgeApi } from '@/api/knowledge'
@@ -123,14 +142,15 @@ import type { AgentMessage, Skill } from '@/types'
 import ToolCard from './agent/ToolCard.vue'
 import MarkdownText from '@/components/MarkdownText.vue'
 import { Microphone } from '@element-plus/icons-vue'
+import CameraCapture from '@/components/CameraCapture.vue'
+import { extractVideoCover } from '@/utils/videoCover'
 
 const auth = useAuthStore()
 
 const messages = ref<AgentMessage[]>([])
 const input = ref('')
-const pendingImage = ref<File | null>(null)
-const pendingImageUrl = ref('')
-const pendingImageBase64 = ref('')
+const pendingImages = ref<{ file: File; url: string; base64: string; name: string; key: string }[]>([])
+const cameraVisible = ref(false)
 const loading = ref(false)
 const scrollerRef = ref<HTMLElement>()
 const isTyping = ref(false)
@@ -277,6 +297,8 @@ async function saveCurrentSession() {
       role: m.role,
       content: (i === typingIdx.value && typingText.value) ? typingText.value : m.content,
       attachmentBase64: m.attachmentBase64,
+      attachmentBase64List: m.attachmentBase64List,
+      attachmentNames: m.attachmentNames,
       toolCalls: m.toolCalls,
     })),
   }
@@ -295,6 +317,7 @@ async function restoreSession(id: string) {
     messages.value = (s.messages || []).map((m: any) => ({
       ...m,
       attachmentUrl: m.attachmentBase64 || undefined,
+      attachmentUrls: m.attachmentBase64List || (m.attachmentBase64 ? [m.attachmentBase64] : undefined),
     }))
     return true
   } catch {
@@ -312,7 +335,7 @@ const skills: { code: Skill; label: string; icon: string }[] = [
 
 const canUseHazard = computed(() => auth.hasSkill('hazard_detect'))
 const canSend = computed(() =>
-  !loading.value && !isTyping.value && (input.value.trim().length > 0 || !!pendingImage.value))
+  !loading.value && !isTyping.value && (input.value.trim().length > 0 || pendingImages.value.length > 0))
 
 const EXAMPLES = [
   '我要消防培训',
@@ -366,32 +389,92 @@ function useExample(text: string, knowledgeMode = false) {
 }
 
 async function onPick(f: any) {
-  const real = f.raw || f
+  const real = (f.raw || f) as File | undefined
   if (!real) return
   if (!canUseHazard.value) {
     ElMessage.warning('当前角色未启用「隐患识别」skill')
     return
   }
-  if (pendingImageUrl.value) URL.revokeObjectURL(pendingImageUrl.value)
+  await addPendingImage(real)
+}
+
+async function addPendingImage(file: File) {
+  if (file.type.startsWith('video/')) {
+    let cover = ''
+    try {
+      cover = await extractVideoCover(file)
+    } catch {
+      cover = ''
+    }
+    pendingImages.value.push({
+      file,
+      url: cover,
+      base64: cover,
+      name: file.name,
+      key: `${file.name}-${file.lastModified}-${Date.now()}`,
+    })
+    ElMessage.success('视频已加入待识别列表')
+    return
+  }
   // 压缩后上传(最大1200px,减少视觉模型推理时间)
+  let compressed: File
   try {
-    pendingImage.value = await compressImageFile(real, 1200, 0.8)
+    compressed = await compressImageFile(file, 1200, 0.8)
   } catch {
-    pendingImage.value = real
+    compressed = file
   }
-  pendingImageUrl.value = URL.createObjectURL(pendingImage.value)
+  const url = URL.createObjectURL(compressed)
+  let base64 = ''
   try {
-    pendingImageBase64.value = await compressImageToBase64(pendingImage.value, 800, 0.7)
+    base64 = await compressImageToBase64(compressed, 800, 0.7)
   } catch {
-    pendingImageBase64.value = ''
+    base64 = ''
   }
+  pendingImages.value.push({
+    file: compressed,
+    url,
+    base64,
+    name: file.name,
+    key: `${file.name}-${file.lastModified}-${Date.now()}`,
+  })
 }
 
 function clearImage() {
-  if (pendingImageUrl.value) URL.revokeObjectURL(pendingImageUrl.value)
-  pendingImage.value = null
-  pendingImageUrl.value = ''
-  pendingImageBase64.value = ''
+  pendingImages.value.forEach(item => URL.revokeObjectURL(item.url))
+  pendingImages.value = []
+}
+
+function removeImage(index: number) {
+  const [removed] = pendingImages.value.splice(index, 1)
+  if (removed) URL.revokeObjectURL(removed.url)
+}
+
+function isVideo(name: string): boolean {
+  return /\.(mp4|webm|mov|mkv|avi)$/i.test(name)
+}
+
+function notifyHighRiskFromAgent(data: any) {
+  import('@/utils/alertSound').then(m => m.playFireTruckAlert())
+  ElNotification({
+    title: '高风险预警',
+    message: `${data.lab_name || '未填写'} 发现 ${data.hazard_count || 0} 项高风险隐患`,
+    type: 'error',
+    duration: 0,
+    position: 'top-right',
+  })
+}
+
+function messageImages(message: AgentMessage) {
+  return message.attachmentBase64List
+    || message.attachmentUrls
+    || (message.attachmentBase64 || message.attachmentUrl ? [message.attachmentBase64 || message.attachmentUrl || ''] : [])
+}
+
+function messageMedia(message: AgentMessage) {
+  const urls = messageImages(message)
+  const names = message.attachmentNames || []
+  if (urls.length) return urls.map((url, index) => ({ url, name: names[index] || '图片' }))
+  return names.map(name => ({ url: '', name }))
 }
 
 function onSelectScenario(text: string) {
@@ -418,25 +501,24 @@ async function send() {
   const userMsg: AgentMessage = {
     role: 'user',
     content: input.value.trim() || '',
-    attachmentUrl: pendingImageUrl.value || undefined,
-    attachmentBase64: pendingImageBase64.value || undefined,
+    attachmentUrls: pendingImages.value.map(item => item.url).filter(Boolean),
+    attachmentBase64List: pendingImages.value.map(item => item.base64).filter(Boolean),
+    attachmentNames: pendingImages.value.map(item => item.name),
   }
   messages.value.push(userMsg)
   const placeholderIdx = messages.value.length
   messages.value.push({ role: 'assistant', content: '', pending: true })
   scrollToBottom()
 
-  const sentImage = pendingImage.value
-  const sentImageUrl = pendingImageUrl.value
+  const sentImages = pendingImages.value.map(item => item.file)
+  const sentImageUrls = pendingImages.value.map(item => item.url)
   const userContent = input.value.trim()
   input.value = ''
-  pendingImage.value = null
-  pendingImageUrl.value = ''
-  pendingImageBase64.value = ''
+  pendingImages.value = []
   loading.value = true
 
   // 快速路径:直接知识库问答(无图片且标记了知识问答模式)
-  const useDirectQA = directKnowledgeMode.value && !sentImage
+  const useDirectQA = directKnowledgeMode.value && !sentImages.length
   directKnowledgeMode.value = false // 用完重置
 
   try {
@@ -456,10 +538,16 @@ async function send() {
     } else {
       const res = await agentApi.chat(
         messages.value.filter((_, i) => i !== placeholderIdx),
-        sentImage,
+        sentImages,
       )
       messages.value[placeholderIdx].pending = false
       messages.value[placeholderIdx].toolCalls = res.tool_calls
+      // 检查 hazard_detection 高风险并弹窗
+      ;(res.tool_calls || []).forEach((tc: any) => {
+        if (tc.result?.type === 'hazard_detection' && tc.result?.data?.overall_severity === 'high') {
+          notifyHighRiskFromAgent(tc.result.data)
+        }
+      })
       typeWriter(placeholderIdx, res.message || '')
     }
   } catch (e: any) {
@@ -468,9 +556,10 @@ async function send() {
     messages.value[placeholderIdx].content = detail ? `抱歉，出错了：${detail}` : '抱歉，刚刚出错了。'
   } finally {
     loading.value = false
-    if (sentImageUrl && !messages.value.some(m => m.attachmentUrl === sentImageUrl)) {
-      URL.revokeObjectURL(sentImageUrl)
-    }
+    sentImageUrls.forEach(url => {
+      const stillUsed = messages.value.some(m => (m.attachmentUrls || []).includes(url) || m.attachmentUrl === url)
+      if (!stillUsed) URL.revokeObjectURL(url)
+    })
     await saveCurrentSession()
     scrollToBottom()
   }
@@ -665,6 +754,68 @@ onMounted(async () => {
   border-radius: 12px;
   max-width: 260px;
   max-height: 360px;
+}
+.bubble-video,
+.attach-video {
+  width: 120px;
+  min-height: 72px;
+  border-radius: 8px;
+  border: 1px solid var(--line-soft);
+  background: #f8fafc;
+  color: var(--txt-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  font-size: 12px;
+  text-align: center;
+  word-break: break-all;
+}
+.bubble-video {
+  width: 220px;
+  min-height: 96px;
+}
+.bubble-img-wrap {
+  position: relative;
+  display: inline-block;
+}
+.bubble-video-fallback {
+  background: #f0f0f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  min-width: 180px;
+}
+.video-badge {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.25);
+  color: #fff;
+  font-size: 28px;
+  border-radius: 8px;
+  pointer-events: none;
+}
+.attach-video-img {
+  max-width: 120px;
+  max-height: 90px;
+  border-radius: 8px;
+  border: 1px solid var(--line-soft);
+}
+.video-badge-small {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.2);
+  color: #fff;
+  font-size: 20px;
+  border-radius: 8px;
+  pointer-events: none;
 }
 .tool-card-wrap + .tool-card-wrap { margin-top: 10px; }
 .tool-card-wrap { margin-bottom: 10px; }

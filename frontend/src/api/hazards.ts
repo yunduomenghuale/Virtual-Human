@@ -10,6 +10,23 @@ export const hazardApi = {
     fd.append('extra_instruction', extra_instruction)
     return http.post<unknown, HazardDetection>('/hazards/detect/', fd)
   },
+  detectMany: (images: File[], lab_id: number | null = null, other_location = '', extra_instruction = '') => {
+    const fd = new FormData()
+    images.forEach(image => fd.append('images', image))
+    if (lab_id) fd.append('lab_id', String(lab_id))
+    fd.append('other_location', other_location)
+    fd.append('extra_instruction', extra_instruction)
+    return http.post<unknown, HazardDetection | { results: HazardDetection[]; count: number }>('/hazards/detect/', fd)
+  },
+  detectMedia: (items: { file: File; mediaType: 'image' | 'video' }[],
+                lab_id: number | null = null, other_location = '', extra_instruction = '') => {
+    const fd = new FormData()
+    items.forEach(item => fd.append(item.mediaType === 'video' ? 'videos' : 'images', item.file))
+    if (lab_id) fd.append('lab_id', String(lab_id))
+    fd.append('other_location', other_location)
+    fd.append('extra_instruction', extra_instruction)
+    return http.post<unknown, HazardDetection | { results: HazardDetection[]; count: number }>('/hazards/detect/', fd)
+  },
   list: (params?: any) =>
     http.get<unknown, { results: HazardDetection[]; count: number }>('/hazards/', { params }),
   retrieve: (id: number) => http.get<unknown, HazardDetection>(`/hazards/${id}/`),

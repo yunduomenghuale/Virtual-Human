@@ -23,7 +23,7 @@ class HazardDetectionViewSet(viewsets.ReadOnlyModelViewSet):
 
     @decorators.action(detail=False, methods=['post'])
     def detect(self, request):
-        ser = DetectRequestSerializer(data=request.data)
+        ser = DetectRequestSerializer(data=request.data, context={'request': request})
         ser.is_valid(raise_exception=True)
         lab_id = ser.validated_data.get('lab_id')
         other_location = ser.validated_data.get('other_location', '')
@@ -34,16 +34,24 @@ class HazardDetectionViewSet(viewsets.ReadOnlyModelViewSet):
                 lab = Lab.objects.get(pk=lab_id)
             except Lab.DoesNotExist:
                 pass
-        detection = detect_and_annotate(
-            user=request.user,
-            image_file=ser.validated_data['image'],
-            lab_name=lab.name if lab else other_location,
-            extra_instruction=ser.validated_data['extra_instruction'],
-        )
-        detection.lab = lab
-        detection.other_location = other_location if not lab else ''
-        detection.save()
-        return response.Response(HazardDetectionSerializer(detection).data,
+        detections = []
+        for media_type, media_file in ser.validated_data['media_items']:
+            detection = detect_and_annotate(
+                user=request.user,
+                image_file=media_file,
+                lab_name=lab.name if lab else other_location,
+                extra_instruction=ser.validated_data['extra_instruction'],
+                media_type=media_type,
+            )
+            detection.lab = lab
+            detection.other_location = other_location if not lab else ''
+            detection.save()
+            detections.append(detection)
+
+        data = HazardDetectionSerializer(detections, many=True).data
+        if len(detections) == 1:
+            return response.Response(data[0], status=status.HTTP_201_CREATED)
+        return response.Response({'results': data, 'count': len(data)},
                                  status=status.HTTP_201_CREATED)
 
     def destroy(self, request, *args, **kwargs):

@@ -151,6 +151,9 @@ USE_MOCK_EMBEDDING = config('USE_MOCK_EMBEDDING', default=False, cast=bool)
 ASR_API_KEY = config('ASR_API_KEY', default=config('TEXT_LLM_API_KEY', default=''))
 ASR_BASE_URL = config('ASR_BASE_URL', default='https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription')
 ASR_MODEL = config('ASR_MODEL', default='paraformer-v1')
+# ===== 通知配置 =====
+WECHAT_WEBHOOK_URL = config('WECHAT_WEBHOOK_URL', default='')
+BASE_URL = config('BASE_URL', default='http://127.0.0.1:8000')
 
 # ===== RAG =====
 VECTOR_STORE_PATH = DATA_DIR / 'vector_store' / 'index.json'

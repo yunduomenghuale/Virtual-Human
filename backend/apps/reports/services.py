@@ -101,7 +101,7 @@ def build_report(*, title: str, lab_name: str, address: str = '', inspector: str
     hazards_brief_text = '; '.join(hazards_brief[:30]) or '无'
 
     eval_input = {
-        'lab_name': lab_name,
+        'lab_name': effective_lab_name,
         'overall_severity': overall,
         'summary_stats': stats,
         'hazards_brief': hazards_brief_text,
@@ -129,7 +129,7 @@ def build_report(*, title: str, lab_name: str, address: str = '', inspector: str
     # 渲染 PDF / DOCX
     base = settings.REPORTS_DIR
     ts = timezone.now().strftime('%Y%m%d_%H%M%S')
-    safe_lab = (lab_name or 'lab').replace('/', '_').replace('\\', '_')
+    safe_lab = (effective_lab_name or 'lab').replace('/', '_').replace('\\', '_')
     pdf_path = base / 'pdf' / f'report_{report.id}_{safe_lab}_{ts}.pdf'
     docx_path = base / 'docx' / f'report_{report.id}_{safe_lab}_{ts}.docx'
     render_pdf(report, detections, pdf_path)

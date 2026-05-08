@@ -99,6 +99,7 @@ const allMenus: MenuItem[] = [
   { path: '/agent/history', title: '对话历史', icon: 'ChatDotRound', condition: () => true },
   { path: '/hazards/history', title: '识别历史', icon: 'List', condition: () => auth.hasSkill('hazard_detect') },
   { path: '/reports', title: '报告列表', icon: 'Document', condition: () => auth.hasSkill('report_gen') },
+  { path: '/analytics/deep', title: '深度分析', icon: 'TrendCharts', condition: () => auth.isAdmin },
 ]
 const menus = computed(() => allMenus.filter(m => m.condition()))
 

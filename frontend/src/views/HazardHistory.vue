@@ -32,7 +32,10 @@
         <el-table-column label="预览" width="100">
           <template #default="{ row }">
             <div class="thumb">
-              <img :src="row.annotated_image || row.original_image" />
+              <img :src="row.media_type === 'video' ? row.cover_image : (row.annotated_image || row.original_image)" />
+              <div v-if="row.media_type === 'video'" class="thumb-play">
+                <el-icon><VideoPlay /></el-icon>
+              </div>
             </div>
           </template>
         </el-table-column>
@@ -71,7 +74,7 @@
 
     <el-drawer v-model="drawer" :title="current?.lab_name || '识别详情'" size="60%">
       <div v-if="current" class="drawer-body">
-        <img :src="current.annotated_image || current.original_image" class="detail-img" />
+        <img :src="current.media_type === 'video' ? current.cover_image : (current.annotated_image || current.original_image)" class="detail-img" />
         <div class="detail-summary">
           <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
             <b>地点:</b>
@@ -215,6 +218,18 @@ onMounted(() => {
   border: 1px solid var(--line-soft);
 }
 .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.thumb-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.25);
+  color: #fff;
+  font-size: 20px;
+  pointer-events: none;
+}
+.thumb { position: relative; }
 
 .drawer-body { padding: 6px 18px 18px; }
 .detail-img {

@@ -28,9 +28,11 @@ class ReportDetailSerializer(ReportListSerializer):
         return [
             {
                 'id': d.id, 'lab_name': d.lab_name,
+                'media_type': d.media_type,
                 'summary': d.summary,
                 'overall_severity': d.overall_severity,
                 'hazards': d.hazards,
+                'cover_image': d.cover_image.url if d.cover_image else None,
                 'original_image': d.original_image.url if d.original_image else None,
                 'annotated_image': d.annotated_image.url if d.annotated_image else None,
                 'created_at': d.created_at.strftime('%Y-%m-%d %H:%M:%S'),

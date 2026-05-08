@@ -6,8 +6,9 @@ export const reportApi = {
     http.get<unknown, { results: ReportSummary[]; count: number }>('/reports/', { params }),
   retrieve: (id: number) => http.get<unknown, ReportDetail>(`/reports/${id}/`),
   generate: (data: {
-    title: string; lab_name: string; inspector: string;
-    detection_ids: number[]; extra_notes?: string;
+    title: string; inspector: string; detection_ids: number[];
+    lab_name?: string; lab_id?: number | null; other_location?: string;
+    address?: string; extra_notes?: string;
   }) => http.post<unknown, ReportDetail>('/reports/generate/', data),
   regenerate: (id: number) => http.post<unknown, ReportDetail>(`/reports/${id}/regenerate/`),
   remove: (id: number) => http.delete(`/reports/${id}/`),

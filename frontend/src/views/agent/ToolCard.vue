@@ -37,7 +37,11 @@
     <div v-else-if="tc.result.type === 'hazard_detection'">
       <div class="hz-grid">
         <div class="hz-image">
-          <img :src="hazardImage" />
+          <img v-if="hazardImage" :src="hazardImage" />
+          <div v-else class="hz-video-fallback">
+            <el-icon><VideoCamera /></el-icon>
+            <span>视频识别</span>
+          </div>
         </div>
         <div class="hz-info">
           <div class="hz-row">
@@ -269,6 +273,62 @@
         <pre v-else class="json-dump">{{ jsonDump }}</pre>
       </component>
     </div>
+
+    <!-- root_cause_analysis -->
+    <div v-else-if="tc.result.type === 'root_cause_analysis'">
+      <div class="rca-summary">{{ tc.result.summary }}</div>
+      <div v-if="tc.result.root_causes?.length" class="rca-list">
+        <div v-for="(rc, i) in tc.result.root_causes" :key="i" class="rca-item">
+          <div class="rca-dim" :class="'dim-' + rc.dimension">{{ rc.dimension }}</div>
+          <div class="rca-finding">{{ rc.finding }}</div>
+          <div class="rca-evidence">证据: {{ rc.evidence }}</div>
+          <el-tag size="small" :type="rc.confidence === '高' ? 'danger' : rc.confidence === '中' ? 'warning' : 'info'" effect="plain">
+            置信度:{{ rc.confidence }}
+          </el-tag>
+        </div>
+      </div>
+      <div v-if="tc.result.risk_hotspots?.length" class="rca-hotspots">
+        <div class="rca-section">风险热点</div>
+        <div v-for="(h, i) in tc.result.risk_hotspots" :key="i" class="hotspot-item">
+          <span class="hotspot-cat">{{ h.category }}</span>
+          <el-tag size="small" :type="h.trend === '上升' ? 'danger' : 'info'" effect="plain">{{ h.trend }}</el-tag>
+          <el-tag size="small" :type="h.urgency === '紧急' ? 'danger' : h.urgency === '重要' ? 'warning' : 'info'" effect="plain">{{ h.urgency }}</el-tag>
+          <span class="hotspot-reason">{{ h.reason }}</span>
+        </div>
+      </div>
+      <div v-if="tc.result.recommendations?.length" class="rca-recs">
+        <div class="rca-section">整改建议</div>
+        <ol>
+          <li v-for="(r, i) in tc.result.recommendations" :key="i">{{ r }}</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- risk_prediction -->
+    <div v-else-if="tc.result.type === 'risk_prediction'">
+      <div class="rpred-summary">{{ tc.result.summary }}</div>
+      <div v-if="tc.result.trend_assessment" class="rpred-trend">
+        <b>历史趋势:</b>{{ tc.result.trend_assessment }}
+      </div>
+      <div v-if="tc.result.forecast?.length" class="rpred-forecast">
+        <div class="rpred-section">风险预测</div>
+        <div v-for="(f, i) in tc.result.forecast" :key="i" class="forecast-item">
+          <span class="forecast-period">{{ f.period }}</span>
+          <el-tag size="small" :type="severityTag(f.risk_level)" effect="dark">{{ severityLabel(f.risk_level) }}</el-tag>
+          <span class="forecast-cats">{{ f.likely_categories?.join('、') }}</span>
+          <el-tag size="small" effect="plain">置信度:{{ f.confidence }}</el-tag>
+        </div>
+      </div>
+      <div v-if="tc.result.early_warnings?.length" class="rpred-warnings">
+        <div class="rpred-section">早期预警</div>
+        <el-alert v-for="(w, i) in tc.result.early_warnings" :key="i"
+                  :title="w.category" :description="w.reason + ' — ' + w.suggested_action"
+                  type="warning" :closable="false" style="margin-bottom:6px;" />
+      </div>
+      <div v-if="tc.result.seasonal_insights" class="rpred-season">
+        <b>季节因素:</b>{{ tc.result.seasonal_insights }}
+      </div>
+    </div>
   </div>
 </template>
 
@@ -294,12 +354,14 @@ const editOtherLocation = ref('')
 const locSaving = ref(false)
 
 function startEditLoc() {
+  if (props.tc.result.type !== 'hazard_detection') return
   editingLoc.value = true
   editLabId.value = null
   editOtherLocation.value = props.tc.result.data?.lab_name || ''
 }
 
 async function saveLoc() {
+  if (props.tc.result.type !== 'hazard_detection') return
   const id = props.tc.result.data?.id
   if (!id) return
   locSaving.value = true
@@ -329,6 +391,8 @@ const HEAD_MAP: Record<string, { icon: string; color: string; title: string }> =
   analytics_query: { icon: 'DataAnalysis', color: '#10b981', title: '数据分析' },
   analytics: { icon: 'DataAnalysis', color: '#10b981', title: '数据分析' },
   scenario_training: { icon: 'HelpFilled', color: '#8b5cf6', title: '场景演练' },
+  root_cause_analysis: { icon: 'Search', color: '#8b5cf6', title: '根因分析' },
+  risk_prediction: { icon: 'TrendCharts', color: '#06b6d4', title: '风险预测' },
   error: { icon: 'WarningFilled', color: '#909399', title: '工具调用' },
 }
 const headIcon = computed(() => HEAD_MAP[props.tc.result.type]?.icon || 'MagicStick')
@@ -337,7 +401,9 @@ const headTitle = computed(() => HEAD_MAP[props.tc.result.type]?.title || '工�
 
 const hazardImage = computed(() => {
   if (props.tc.result.type !== 'hazard_detection') return ''
-  return props.tc.result.data.annotated_image || props.tc.result.data.original_image
+  return props.tc.result.data.cover_image
+    || props.tc.result.data.annotated_image
+    || (props.tc.result.data.media_type === 'image' ? props.tc.result.data.original_image : '')
 })
 
 function metricLabel(m: string) {
@@ -502,6 +568,17 @@ function selectScenario(item: any) {
   background: #000;
 }
 .hz-image img { display: block; width: 100%; }
+.hz-video-fallback {
+  width: 100%;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #d1d5db;
+  background: #0f172a;
+}
 .hz-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .hz-row { display: flex; gap: 10px; align-items: center; font-size: 13px; }
 .hz-label { color: var(--txt-muted); width: 60px; flex-shrink: 0; font-size: 12px; }
@@ -804,4 +881,54 @@ function selectScenario(item: any) {
   color: #94a3b8;
   margin-top: 2px;
 }
+
+/* root_cause_analysis */
+.rca-summary { font-size: 13px; line-height: 1.7; color: var(--txt-primary); margin-bottom: 10px; }
+.rca-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.rca-item {
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+.rca-dim {
+  display: inline-block;
+  font-size: 12px; font-weight: 600;
+  padding: 2px 8px; border-radius: 4px;
+  margin-bottom: 6px;
+}
+.rca-dim.dim-管理 { background: #fef3c7; color: #92400e; }
+.rca-dim.dim-设备 { background: #dbeafe; color: #1e40af; }
+.rca-dim.dim-环境 { background: #d1fae5; color: #065f46; }
+.rca-dim.dim-人员 { background: #fce7f3; color: #9d174d; }
+.rca-finding { font-size: 13px; color: var(--txt-primary); margin-bottom: 4px; }
+.rca-evidence { font-size: 11px; color: var(--txt-muted); margin-bottom: 6px; }
+.rca-hotspots, .rca-recs { margin-top: 10px; }
+.rca-section { font-size: 13px; font-weight: 600; color: var(--txt-primary); margin-bottom: 6px; }
+.hotspot-item {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 0; font-size: 12px;
+  border-bottom: 1px dashed var(--line-soft);
+}
+.hotspot-item:last-child { border-bottom: none; }
+.hotspot-cat { font-weight: 600; color: var(--txt-primary); }
+.hotspot-reason { color: var(--txt-secondary); flex: 1; }
+.rca-recs ol { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.8; color: var(--txt-secondary); }
+
+/* risk_prediction */
+.rpred-summary { font-size: 13px; line-height: 1.7; color: var(--txt-primary); margin-bottom: 10px; }
+.rpred-trend, .rpred-season { font-size: 12px; color: var(--txt-secondary); margin-bottom: 8px; line-height: 1.6; }
+.rpred-forecast, .rpred-warnings { margin-top: 10px; }
+.rpred-section { font-size: 13px; font-weight: 600; color: var(--txt-primary); margin-bottom: 6px; }
+.forecast-item {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.forecast-period { font-weight: 600; color: var(--txt-primary); min-width: 80px; }
+.forecast-cats { color: var(--txt-secondary); flex: 1; }
 </style>

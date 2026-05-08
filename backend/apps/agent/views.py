@@ -23,7 +23,8 @@ class AgentChatView(APIView):
 
     请求(multipart/form-data):
       messages   — JSON 字符串,[{role, content}, ...]
-      attachment — 可选,图片文件(hazard_detect 会消费它)
+      attachment  — 可选,单张图片文件(hazard_detect 会消费它)
+      attachments — 可选,多张图片文件,与 attachment 兼容
 
     或 application/json(无附件场景):
       { "messages": [{role, content}, ...] }
@@ -53,13 +54,19 @@ class AgentChatView(APIView):
                 return Response({'detail': 'messages 项必须包含 role 和 content'},
                                 status=status.HTTP_400_BAD_REQUEST)
 
-        attachment = request.FILES.get('attachment')
+        attachments = []
+        attachments.extend(request.FILES.getlist('attachments'))
+        attachments.extend(request.FILES.getlist('videos'))
+        legacy_attachment = request.FILES.get('attachment')
+        if legacy_attachment:
+            attachments.append(legacy_attachment)
 
         try:
             result = services.chat(
                 user=request.user,
                 messages=messages,
-                attachment=attachment,
+                attachment=attachments[0] if len(attachments) == 1 else None,
+                attachments=attachments,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception('Agent chat 失败: %s', exc)

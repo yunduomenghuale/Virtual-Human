@@ -28,12 +28,16 @@ MAX_ITERATIONS = 5
 
 
 SYSTEM_PROMPT_TMPL = (
-    '你是「小安」,智安平台的 AI 助手,具备以下 5 项 skill,通过 tool-calling 调度:\n'
+    '你是「小安」,智安平台的 AI 助手,具备以下 7 项 skill,通过 tool-calling 调度:\n'
     '  - knowledge_qa: 检索消防安全知识库回答规范性问题\n'
     '  - hazard_detect: 对用户上传的现场图片识别隐患(需有图片)\n'
     '  - report_gen: 为某实验室生成 PDF / Word 安全检查报告\n'
     '  - analytics_query: 查询系统数据指标 / 实验室排行 / 最近隐患记录\n'
     '  - scenario_training: 当用户要求进行消防培训、出题、演练或者分析事故场景时调用\n'
+    '  - root_cause_analysis: 深度根因分析。当用户问"为什么"、"怎么回事"、"原因是什么"、'
+    '"分析一下XX实验室隐患反复出现的原因"时调用。会从管理/设备/环境/人员四个维度分析根本原因。\n'
+    '  - risk_prediction: 风险预测。当用户问"未来"、"预测"、"会不会"、"下个月"、'
+    '"接下来风险趋势"时调用。基于历史时间序列+季节因素预测未来风险。\n'
     '\n'
     '当前用户:{username}({role}),启用的 skill:{enabled_skills}。\n'
     '本轮用户附件:{attachment_state}。\n'
@@ -48,19 +52,21 @@ SYSTEM_PROMPT_TMPL = (
     '   c) 用户要求测试时，调用 scenario_training(mode="testing")，工具返回场景描述，你向用户描述事故并提问。\n'
     '   d) 用户回答后，再次调用 scenario_training(mode="testing", answer="用户回答")，工具返回评分结果，你直接展示给用户。\n'
     '   e) 你的回复中禁止出现"任务指示"、"教学讲义内容"等元话语，直接输出讲解内容或评分结果即可。\n'
-    '5. 工具结果会以结构化卡片形式呈现给用户;你只需用 1-2 句话点出要点 / 提示 / '
+    '5. 用户问"为什么"、"原因"、"分析"类问题时,调用 root_cause_analysis,不要自己编造原因。\n'
+    '6. 用户问"未来"、"预测"、"趋势"类问题时,调用 risk_prediction,不要自己猜测。\n'
+    '7. 工具结果会以结构化卡片形式呈现给用户;你只需用 1-2 句话点出要点 / 提示 / '
     '建议,不要冗长复述工具数据。\n'
-    '6. 数据分析(analytics_query)的结果禁止罗列数字,必须给出"结论+建议":\n'
+    '8. 数据分析(analytics_query / root_cause_analysis / risk_prediction)的结果禁止罗列数字,必须给出"结论+建议":\n'
     '   - 点出最高风险项(哪个实验室/哪类隐患最严重)\n'
     '   - 指出变化趋势(上升/下降/持平,与平均水平的差距)\n'
     '   - 给出可执行建议("建议本周复查XX实验室"、"建议关注电气安全")\n'
     '   - 最多 2 句话,禁止输出 JSON 或表格\n'
-    '   - 当用户提到具体实验室名称时,必须在 analytics_query 中传入 lab_name 参数,禁止返回全局数据\n'
-    '7. 严禁在回复中输出 /media/ 路径的 markdown 下载链接,前端会自动展示下载按钮。\n'
-    '8. 严禁以 JSON、markdown 代码块或文本形式输出工具参数,必须通过正式的 tool-calling 机制调用。\n'
-    '9. 若用户问题与消防安全无关,礼貌引导回主题。\n'
-    '10. 中文回答,语气专业、简洁。\n'
-    '11. 最重要:不要描述你要做什么,直接调用工具。禁止输出"我将为您调用..."等任何说明性文字。\n'
+    '   - 当用户提到具体实验室名称时,必须在工具参数中传入 lab_name,禁止返回全局数据\n'
+    '9. 严禁在回复中输出 /media/ 路径的 markdown 下载链接,前端会自动展示下载按钮。\n'
+    '10. 严禁以 JSON、markdown 代码块或文本形式输出工具参数,必须通过正式的 tool-calling 机制调用。\n'
+    '11. 若用户问题与消防安全无关,礼貌引导回主题。\n'
+    '12. 中文回答,语气专业、简洁。\n'
+    '13. 最重要:不要描述你要做什么,直接调用工具。禁止输出"我将为您调用..."等任何说明性文字。\n'
 )
 
 
@@ -120,12 +126,30 @@ def _extract_scenario_args(text: str) -> Optional[Dict[str, str]]:
     return args
 
 
-def _system_prompt(user, has_attachment: bool) -> str:
+def _extract_location_hint(text: str) -> str:
+    """从带图片的用户消息里提取地点提示,用于批量识别记录归属。"""
+    t = (text or '').strip()
+    if not t:
+        return ''
+    patterns = [
+        r'(?:地点|位置|实验室|检查地点)\s*(?:是|为|:|：)?\s*([^,，。；;\n]{2,40})',
+        r'((?:化学楼|物理楼|实验楼|教学楼|总控中心|走廊|楼梯间|实验室)[^,，。；;\n]{0,30})',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, t)
+        if m:
+            return m.group(1).strip()
+    if len(t) <= 20 and not re.search(r'[?？]|识别|分析|看看|图片|隐患', t):
+        return t
+    return ''
+
+
+def _system_prompt(user, has_attachment: bool, attachment_count: int = 0) -> str:
     return SYSTEM_PROMPT_TMPL.format(
         username=user.username,
         role=user.role,
         enabled_skills=','.join(list_skill_codes_for_user(user)) or '无',
-        attachment_state='已上传 1 张图片' if has_attachment else '无',
+        attachment_state=f'已上传 {attachment_count or 1} 张图片' if has_attachment else '无',
     )
 
 
@@ -317,35 +341,46 @@ def _serialize_assistant_msg(msg) -> Dict[str, Any]:
 
 
 def chat(*, user, messages: List[Dict[str, Any]],
-         attachment=None) -> Dict[str, Any]:
+         attachment=None, attachments=None) -> Dict[str, Any]:
     """运行一次 agent 对话。
 
     :param user: 当前登录用户(用于 RBAC + 业务记录归属)
     :param messages: [{'role': 'user'|'assistant', 'content': str}, ...]
     :param attachment: 可选的 InMemoryUploadedFile / TemporaryUploadedFile,
                        hazard_detect 工具会消费该附件
+    :param attachments: 可选的图片附件列表,用于批量隐患识别
     :return: {
         'message': str,                # 最终 assistant 文本
         'tool_calls': [...],           # 工具调用日志(供前端渲染卡片)
         'enabled_skills': [...],       # 当前用户的可用 skill
     }
     """
-    has_attachment = attachment is not None
+    attachment_list = list(attachments or [])
+    if attachment is not None and not attachment_list:
+        attachment_list = [attachment]
+    has_attachment = bool(attachment_list)
 
     # 硬规则:有附件直接隐患识别,跳过 LLM 决策轮次(更快且避免 LLM 不调用工具)
     if has_attachment and is_skill_enabled(user.role, SkillCode.HAZARD_DETECT):
-        summary, payload = execute_tool(
-            name='hazard_detect', args={}, user=user, attachment=attachment,
-        )
-        return {
-            'message': payload.get('user_summary', summary) if payload.get('type') == 'hazard_detection' else summary,
-            'tool_calls': [{
+        tool_calls = []
+        summaries = []
+        last_user_msg = next((m for m in reversed(messages or []) if m.get('role') == 'user'), None)
+        lab_name = _extract_location_hint(last_user_msg.get('content', '') if last_user_msg else '')
+        for index, item in enumerate(attachment_list, start=1):
+            summary, payload = execute_tool(
+                name='hazard_detect', args={'lab_name': lab_name}, user=user, attachment=item,
+            )
+            summaries.append(f'图片 {index}: {payload.get("user_summary", summary)}')
+            tool_calls.append({
                 'name': 'hazard_detect',
-                'args': {},
+                'args': {'image_index': index},
                 'skill': 'hazard_detect',
                 'ok': payload.get('type') != 'error',
                 'result': payload,
-            }],
+            })
+        return {
+            'message': '\n'.join(summaries),
+            'tool_calls': tool_calls,
             'enabled_skills': list_skill_codes_for_user(user),
         }
 
@@ -391,7 +426,7 @@ def chat(*, user, messages: List[Dict[str, Any]],
                     'enabled_skills': list_skill_codes_for_user(user),
                 }
 
-    sys_prompt = _system_prompt(user, has_attachment)
+    sys_prompt = _system_prompt(user, has_attachment, len(attachment_list))
     full_messages: List[Dict[str, Any]] = [
         {'role': 'system', 'content': sys_prompt},
     ]
@@ -401,13 +436,13 @@ def chat(*, user, messages: List[Dict[str, Any]],
         full_messages.append({
             'role': 'system',
             'content': '【附件提示】用户在本轮上传了一张图片。如其与消防安全相关,'
-                       '请调用 hazard_detect。该图片只在本轮可用。',
+                       f'请调用 hazard_detect。图片共 {len(attachment_list)} 张,只在本轮可用。',
         })
 
     tools = filter_tools_for_user(user, has_attachment)
     llm = get_text_llm()
     tool_log: List[Dict[str, Any]] = []
-    attachment_consumed = False
+    attachment_index = 0
 
     final_text = ''
     single_knowledge_qa = False  # 标记是否为单一知识问答短路
@@ -497,7 +532,7 @@ def chat(*, user, messages: List[Dict[str, Any]],
                 if last_user_msg:
                     a['query'] = last_user_msg.get('content', '')
             logger.info('Agent 执行工具:%s, args:%s', name, a)
-            att = None if attachment_consumed else attachment
+            att = attachment_list[attachment_index] if attachment_index < len(attachment_list) else None
             s, p = execute_tool(name=name, args=a, user=user, attachment=att)
             return tc_item, name, a, s, p
 
@@ -508,8 +543,8 @@ def chat(*, user, messages: List[Dict[str, Any]],
         # hazard_detect 串行(可能消耗 attachment)
         for tc in hazard_tcs:
             tc_item, name, a, s, p = _exec_tool(tc)
-            if name == 'hazard_detect' and not attachment_consumed:
-                attachment_consumed = True
+            if name == 'hazard_detect':
+                attachment_index += 1
             exec_results.append((tc_item, name, a, s, p))
 
         # 其余并行

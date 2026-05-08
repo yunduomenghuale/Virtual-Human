@@ -5,6 +5,7 @@ from django.db import models
 class HazardDetection(models.Model):
     """一次图片上传 + 一次隐患识别。"""
     SEVERITY_CHOICES = [('low', '低'), ('medium', '中'), ('high', '高')]
+    MEDIA_TYPE_CHOICES = [('image', '图片'), ('video', '视频')]
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
                              related_name='hazard_detections')
@@ -15,7 +16,11 @@ class HazardDetection(models.Model):
         related_name='hazard_detections',
     )
     other_location = models.CharField('其他地点', max_length=128, blank=True, default='')
-    original_image = models.ImageField('原始图片', upload_to='hazards/original/')
+    media_type = models.CharField('媒体类型', max_length=10, choices=MEDIA_TYPE_CHOICES,
+                                  default='image')
+    original_image = models.FileField('原始媒体', upload_to='hazards/original/')
+    cover_image = models.ImageField('封面图', upload_to='hazards/covers/',
+                                    blank=True, null=True)
     annotated_image = models.ImageField('标注图片', upload_to='hazards/annotated/',
                                         blank=True, null=True)
     summary = models.TextField('整体评估', blank=True, default='')

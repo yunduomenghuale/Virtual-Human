@@ -48,6 +48,15 @@ class KnowledgeQAStreamView(APIView):
         question = ser.validated_data['question']
         top_k = ser.validated_data['top_k']
 
+        # 先获取结果创建 QASession,再走流式输出(answer_question 有缓存,命中时几乎无成本)
+        result = services.answer_question(question, top_k=top_k)
+        QASession.objects.create(
+            user=request.user,
+            question=question,
+            answer=result['answer'],
+            sources=result.get('sources', []),
+        )
+
         def event_stream():
             for line in services.answer_question_stream(question, top_k=top_k):
                 yield f'data: {line}\n\n'

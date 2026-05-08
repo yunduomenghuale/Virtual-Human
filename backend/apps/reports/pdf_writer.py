@@ -114,7 +114,7 @@ def render_pdf(report, detections: List[Any], output_path: Path) -> Path:
             ['总体风险', SEVERITY_LABEL.get(report.overall_severity, '中'),
              '生成时间', report.created_at.strftime('%Y-%m-%d %H:%M')],
             ['创建人', report.created_by.username if report.created_by_id else '-',
-             '隐患图片数', str(len(detections))],
+             '隐患记录数', str(len(detections))],
         ]
     elif report.address:
         info_rows = [
@@ -175,12 +175,15 @@ def render_pdf(report, detections: List[Any], output_path: Path) -> Path:
         idx += 1
         flow.append(Paragraph(f'{idx}. {det.lab_name or "现场图片"}({det.created_at.strftime("%Y-%m-%d %H:%M")})',
                               styles['body']))
-        img_path = det.annotated_image.path if det.annotated_image else det.original_image.path
-        try:
-            img = Image(img_path, width=14 * cm, height=10.5 * cm, kind='proportional')
-            flow.append(img)
-        except Exception:
-            flow.append(Paragraph('[图片加载失败]', styles['small']))
+        if getattr(det, 'media_type', 'image') == 'video':
+            flow.append(Paragraph(f'[视频文件] {Path(det.original_image.name).name}', styles['small']))
+        else:
+            img_path = det.annotated_image.path if det.annotated_image else det.original_image.path
+            try:
+                img = Image(img_path, width=14 * cm, height=10.5 * cm, kind='proportional')
+                flow.append(img)
+            except Exception:
+                flow.append(Paragraph('[图片加载失败]', styles['small']))
         flow.append(Spacer(1, 4))
         flow.append(Paragraph(f'整体评估:{det.summary or "-"}', styles['small']))
         # 隐患明细表

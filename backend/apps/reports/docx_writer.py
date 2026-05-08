@@ -98,7 +98,7 @@ def render_docx(report, detections: List[Any], output_path: Path) -> Path:
             ('总体风险', SEVERITY_LABEL.get(report.overall_severity, '中'),
              '生成时间', report.created_at.strftime('%Y-%m-%d %H:%M')),
             ('创建人', report.created_by.username if report.created_by_id else '-',
-             '隐患图片数', str(len(detections))),
+             '隐患记录数', str(len(detections))),
         ]
         info_table = doc.add_table(rows=3, cols=4)
     elif report.address:
@@ -158,11 +158,14 @@ def render_docx(report, detections: List[Any], output_path: Path) -> Path:
         p = doc.add_paragraph()
         _set_cn_font(p.add_run(
             f'{idx}. {det.lab_name or "现场图片"}({det.created_at.strftime("%Y-%m-%d %H:%M")})'))
-        img_path = det.annotated_image.path if det.annotated_image else det.original_image.path
-        try:
-            doc.add_picture(img_path, width=Cm(15))
-        except Exception:
-            _set_cn_font(doc.add_paragraph().add_run('[图片加载失败]'))
+        if getattr(det, 'media_type', 'image') == 'video':
+            _set_cn_font(doc.add_paragraph().add_run(f'[视频文件] {Path(det.original_image.name).name}'))
+        else:
+            img_path = det.annotated_image.path if det.annotated_image else det.original_image.path
+            try:
+                doc.add_picture(img_path, width=Cm(15))
+            except Exception:
+                _set_cn_font(doc.add_paragraph().add_run('[图片加载失败]'))
         _set_cn_font(doc.add_paragraph().add_run(f'整体评估:{det.summary or "-"}'))
 
         if det.hazards:

@@ -17,6 +17,17 @@ from apps.skill_permissions.services import is_skill_enabled
 
 logger = logging.getLogger(__name__)
 
+# 新增深度分析工具需要的模型导入(延迟导入避免循环依赖)
+_QASession = None
+
+
+def _get_qasession_model():
+    global _QASession
+    if _QASession is None:
+        from apps.knowledge.models import QASession as _m
+        _QASession = _m
+    return _QASession
+
 
 # ==========================================================
 # Tool 定义(OpenAI tool-calling JSON Schema 格式)
@@ -165,6 +176,62 @@ TOOL_DEFS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'root_cause_analysis',
+            'description': (
+                '深度根因分析: 基于历史隐患数据,从管理/设备/环境/人员四个维度'
+                '分析某实验室隐患反复出现的根本原因。'
+                '当用户问"为什么"、"怎么回事"、"原因是什么"、"分析一下"时使用。'
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'lab_name': {
+                        'type': 'string',
+                        'description': '实验室名称,不传则分析全部实验室',
+                    },
+                    'days': {
+                        'type': 'integer',
+                        'description': '分析最近多少天的数据,默认30',
+                        'default': 30,
+                    },
+                },
+                'required': [],
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'risk_prediction',
+            'description': (
+                '风险预测: 基于历史隐患时间序列+季节因素,预测未来风险趋势。'
+                '当用户问"未来"、"预测"、"会不会"、"下个月"、"接下来"时使用。'
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'lab_name': {
+                        'type': 'string',
+                        'description': '实验室名称,不传则预测全部',
+                    },
+                    'days': {
+                        'type': 'integer',
+                        'description': '历史回溯天数,默认30',
+                        'default': 30,
+                    },
+                    'forecast_days': {
+                        'type': 'integer',
+                        'description': '预测未来天数,默认30',
+                        'default': 30,
+                    },
+                },
+                'required': [],
+            },
+        },
+    },
 ]
 
 
@@ -175,6 +242,8 @@ SKILL_MAP: Dict[str, str] = {
     'report_gen': SkillCode.REPORT_GEN,
     'analytics_query': SkillCode.ANALYTICS,
     'scenario_training': SkillCode.SCENARIO_TRAINING,
+    'root_cause_analysis': SkillCode.ANALYTICS,
+    'risk_prediction': SkillCode.ANALYTICS,
 }
 
 
@@ -215,7 +284,7 @@ def execute_tool(*, name: str, args: Dict[str, Any], user,
 
     try:
         if name == 'knowledge_qa':
-            return _run_knowledge_qa(args)
+            return _run_knowledge_qa(args, user)
         if name == 'hazard_detect':
             return _run_hazard_detect(args, user, attachment)
         if name == 'report_gen':
@@ -224,6 +293,10 @@ def execute_tool(*, name: str, args: Dict[str, Any], user,
             return _run_analytics(args)
         if name == 'scenario_training':
             return _run_scenario_training(args)
+        if name == 'root_cause_analysis':
+            return _run_root_cause_analysis(args, user)
+        if name == 'risk_prediction':
+            return _run_risk_prediction(args, user)
     except Exception as exc:  # noqa: BLE001
         logger.exception('工具 %s 执行失败: %s', name, exc)
         return f'工具 {name} 执行失败:{exc}', _err_payload(str(exc), name)
@@ -232,13 +305,20 @@ def execute_tool(*, name: str, args: Dict[str, Any], user,
 
 
 # ----- knowledge_qa -----
-def _run_knowledge_qa(args: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+def _run_knowledge_qa(args: Dict[str, Any], user) -> Tuple[str, Dict[str, Any]]:
     from apps.knowledge.services import answer_question
+    from apps.knowledge.models import QASession
     query = (args.get('query') or '').strip()
     if not query:
         return '工具调用缺少 query 参数。', _err_payload('缺少 query', 'knowledge_qa')
     res = answer_question(query, top_k=4)
     answer = res.get('answer', '')
+    QASession.objects.create(
+        user=user,
+        question=query,
+        answer=answer,
+        sources=res.get('sources', []),
+    )
     # 返回给 LLM 的摘要简化为答案本身,不再列出参考资料
     return answer[:2000], {
         'type': 'knowledge_qa',
@@ -256,9 +336,13 @@ def _run_hazard_detect(args: Dict[str, Any], user, attachment) -> Tuple[str, Dic
                 _err_payload('缺少图片', 'hazard_detect'))
     lab_name = (args.get('lab_name') or '').strip()
     extra = (args.get('extra_instruction') or '').strip()
+    content_type = getattr(attachment, 'content_type', '') or ''
+    name_lower = (getattr(attachment, 'name', '') or '').lower()
+    media_type = 'video' if content_type.startswith('video/') or name_lower.endswith(('.mp4', '.mov', '.webm', '.m4v')) else 'image'
     detection = detect_and_annotate(
         user=user, image_file=attachment,
         lab_name=lab_name, extra_instruction=extra,
+        media_type=media_type,
     )
     payload = HazardDetectionSerializer(detection).data
     hazards = payload.get('hazards') or []
@@ -285,6 +369,8 @@ def _run_hazard_detect(args: Dict[str, Any], user, attachment) -> Tuple[str, Dic
     clean_payload = {
         'id': payload.get('id'),
         'lab_name': payload.get('lab_name'),
+        'media_type': payload.get('media_type'),
+        'cover_image': payload.get('cover_image'),
         'overall_severity': payload.get('overall_severity'),
         'summary': payload.get('summary'),
         'hazard_count': payload.get('hazard_count'),
@@ -329,14 +415,13 @@ def _run_report_gen(args: Dict[str, Any], user) -> Tuple[str, Dict[str, Any]]:
             for d in candidates:
                 if d.lab_name.replace(' ', '').replace('　', '') == normalized:
                     matched_ids.append(d.id)
-                if len(matched_ids) >= 1:
+                if len(matched_ids) >= 10:
                     break
             if matched_ids:
                 qs = HazardDetection.objects.filter(id__in=matched_ids).order_by('-created_at')
-        detection_ids = [d.id for d in qs[:1]]
+        detection_ids = [d.id for d in qs[:10]]
     else:
-        # 若手动提供了多条,只保留最新的一条
-        detection_ids = [detection_ids[0]]
+        detection_ids = detection_ids[:10]
     if not detection_ids:
         return ('该实验室暂无常患识别记录，无法生成报告。您可以先上传一张现场照片，我将为您识别隐患并保存记录，随后即可生成正式的安全检查报告。',
                 _err_payload('无记录', 'report_gen'))
@@ -567,8 +652,25 @@ def _run_scenario_training(args: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
         'mode': 'testing',
         'data': data
     }
+# ----- root_cause_analysis -----
+def _run_root_cause_analysis(args: Dict[str, Any], user) -> Tuple[str, Dict[str, Any]]:
+    from apps.analytics.deep_analysis import analyze_root_cause
+    lab_name = (args.get('lab_name') or '').strip() or None
+    days = args.get('days', 30)
+    result = analyze_root_cause(lab_name=lab_name, days=days)
+    summary = result.get('summary', '')
+    return summary, result
 
 
+# ----- risk_prediction -----
+def _run_risk_prediction(args: Dict[str, Any], user) -> Tuple[str, Dict[str, Any]]:
+    from apps.analytics.deep_analysis import predict_risks
+    lab_name = (args.get('lab_name') or '').strip() or None
+    days = args.get('days', 30)
+    forecast_days = args.get('forecast_days', 30)
+    result = predict_risks(lab_name=lab_name, days=days, forecast_days=forecast_days)
+    summary = result.get('summary', '')
+    return summary, result
 
 # ----- helpers -----
 def _err_payload(msg: str, tool: str) -> Dict[str, Any]:
