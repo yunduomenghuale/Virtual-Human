@@ -46,6 +46,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -94,6 +95,9 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# Whitenoise 静态文件服务（生产环境）
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = DATA_DIR
@@ -155,6 +159,47 @@ ASR_MODEL = config('ASR_MODEL', default='paraformer-v1')
 WECHAT_WEBHOOK_URL = config('WECHAT_WEBHOOK_URL', default='')
 BASE_URL = config('BASE_URL', default='http://127.0.0.1:8000')
 
+# ===== Logging =====
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'standard': {
+            'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'standard',
+        },
+        'file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': DATA_DIR / 'logs' / 'django.log',
+            'maxBytes': 10485760,  # 10MB
+            'backupCount': 5,
+            'formatter': 'standard',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'apps': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
+# ===== Security (production hardening) =====
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_BROWSER_XSS_FILTER = True
+X_FRAME_OPTIONS = 'DENY'
+
 # ===== RAG =====
 VECTOR_STORE_PATH = DATA_DIR / 'vector_store' / 'index.json'
 KNOWLEDGE_BASE_DIR = DATA_DIR / 'knowledge_base'
@@ -163,5 +208,5 @@ KNOWLEDGE_BASE_DIR = DATA_DIR / 'knowledge_base'
 UPLOAD_DIR = DATA_DIR / 'uploads'
 REPORTS_DIR = DATA_DIR / 'reports'
 HAZARDS_DIR = DATA_DIR / 'hazards'
-for _d in (VECTOR_STORE_PATH.parent, KNOWLEDGE_BASE_DIR, UPLOAD_DIR, REPORTS_DIR, HAZARDS_DIR):
+for _d in (VECTOR_STORE_PATH.parent, KNOWLEDGE_BASE_DIR, UPLOAD_DIR, REPORTS_DIR, HAZARDS_DIR, DATA_DIR / 'logs'):
     _d.mkdir(parents=True, exist_ok=True)

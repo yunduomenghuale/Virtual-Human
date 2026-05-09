@@ -16,3 +16,7 @@ reportlab>=4.2
 python-docx>=1.1
 pypdf>=4.3
 markdown>=3.6
+
+# Production
+whitenoise>=6.7
+gunicorn>=23.0
