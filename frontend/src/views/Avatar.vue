@@ -175,19 +175,12 @@
             <p v-if="sdkError" class="error-text">{{ sdkError }}</p>
           </div>
 
-          <!-- 字幕 -->
+          <!-- 字幕：由 SDK onWidgetEvent 驱动，位置固定在底部居中 -->
           <div class="subtitle-wrapper">
             <transition name="subtitle-fade">
               <div v-if="currentSubtitle" class="subtitle-bar">
                 <div class="subtitle-scan" />
                 <p class="subtitle-text">{{ currentSubtitle }}</p>
-              </div>
-            </transition>
-            <transition name="subtitle-fade">
-              <div v-if="aiLoading" class="subtitle-bar thinking">
-                <div class="subtitle-scan" />
-                <div class="thinking-dots"><span /><span /><span /></div>
-                <span class="thinking-label">小安正在思考</span>
               </div>
             </transition>
           </div>
@@ -308,7 +301,6 @@ const videoRef = ref<HTMLVideoElement | null>(null)
 
 let avatar: any = null
 let recognition: any = null
-let subtitleTimer: number | null = null
 
 const carouselImages = [
   '/showcase/images/1登录页.png',
@@ -452,10 +444,13 @@ async function initAvatar() {
       onStateChange(state: string) { console.log('[Avatar State]', state) },
       onVoiceStateChange(status: 'start' | 'end') {
         if (status === 'start') avatarState.value = 'speak'
-        if (status === 'end') {
-          avatarState.value = 'idle'
-          if (subtitleTimer) clearTimeout(subtitleTimer)
-          subtitleTimer = window.setTimeout(() => { currentSubtitle.value = '' }, 3000)
+        if (status === 'end') avatarState.value = 'idle'
+      },
+      onWidgetEvent(event: any) {
+        if (event.type === 'subtitle_on') {
+          currentSubtitle.value = event.text || ''
+        } else if (event.type === 'subtitle_off') {
+          currentSubtitle.value = ''
         }
       },
     })
@@ -502,7 +497,6 @@ function escapeXml(text: string): string {
 function speakContent(text: string) {
   if (!avatar) return
   avatarState.value = 'speak'
-  currentSubtitle.value = text
   const safe = escapeXml(text)
   avatar.speak(safe, true, true)
 }
@@ -523,7 +517,6 @@ async function speakText() {
   avatarState.value = 'think'
   avatar?.think()
   aiLoading.value = true
-  currentSubtitle.value = ''
   try {
     const safeMessages = messages.value.filter(m => m.role === 'user' || m.role === 'assistant').map(m => ({ role: m.role, content: m.content || '' }))
     const res = await agentApi.chat(safeMessages, sentImages)
@@ -535,7 +528,6 @@ async function speakText() {
     const errMsg = detail ? `抱歉，出错了：${detail}` : '抱歉，刚刚出错了。'
     avatarState.value = 'idle'
     avatar?.idle()
-    currentSubtitle.value = ''
     ElMessage.error(errMsg)
   } finally {
     aiLoading.value = false
@@ -643,7 +635,6 @@ onUnmounted(() => {
   document.body.style.overflow = ''
   stopCarousel()
   if (timeInterval) clearInterval(timeInterval)
-  if (subtitleTimer) clearTimeout(subtitleTimer)
   if (resizeFixTimer) clearTimeout(resizeFixTimer)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('resize', onResizeFix)
@@ -897,7 +888,7 @@ onUnmounted(() => {
 .placeholder-text { font-size: 13px; color: rgba(255,255,255,.35); margin: 0; }
 .error-text { font-size: 11px; color: #f87171; max-width: 300px; text-align: center; margin: 0; }
 
-/* 字幕 */
+/* 字幕：由 SDK onWidgetEvent 驱动，定位在底部居中 */
 .subtitle-wrapper {
   position: absolute; bottom: 14px; left: 50%;
   transform: translateX(-50%);
@@ -918,14 +909,6 @@ onUnmounted(() => {
 }
 @keyframes scan-glide { 0%{left:-60%} 100%{left:160%} }
 .subtitle-text { margin: 0; font-size: 14px; line-height: 1.6; color: rgba(255,255,255,.9); }
-.subtitle-bar.thinking { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 20px; }
-.thinking-dots { display: flex; align-items: center; gap: 3px; }
-.thinking-dots span { width: 5px; height: 5px; border-radius: 50%; background: #f59e0b; animation: dot-bounce 1.4s infinite ease-in-out both; }
-.thinking-dots span:nth-child(1) { animation-delay: -.32s; }
-.thinking-dots span:nth-child(2) { animation-delay: -.16s; }
-.thinking-dots span:nth-child(3) { animation-delay: 0s; }
-@keyframes dot-bounce { 0%,80%,100%{transform:scale(0);opacity:.4} 40%{transform:scale(1);opacity:1} }
-.thinking-label { font-size: 12px; color: rgba(255,255,255,.5); }
 .subtitle-fade-enter-active, .subtitle-fade-leave-active { transition: all .3s cubic-bezier(.4,0,.2,1); }
 .subtitle-fade-enter-from, .subtitle-fade-leave-to { opacity: 0; transform: translateY(6px); }
 

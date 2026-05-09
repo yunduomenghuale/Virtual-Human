@@ -50,3 +50,6 @@ backend/data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Large media files
+frontend/public/showcase/video/
